@@ -88,6 +88,15 @@ def _chunk_cards(card: dict, max_bytes: int = MAX_BODY_BYTES) -> list[dict]:
     return cards or [card]
 
 
+def build_markdown_card(title: str, body_md: str) -> dict:
+    """把一段 markdown 正文包成 schema 2.0 卡片（过长由 _chunk_cards 自动分片）。"""
+    return {
+        "schema": "2.0",
+        "header": {"title": {"tag": "plain_text", "content": title}},
+        "body": {"elements": [{"tag": "markdown", "content": body_md}]},
+    }
+
+
 class FeishuBot(DeliveryChannel):
     kind = "feishu_bot"
 
@@ -118,6 +127,13 @@ class FeishuBot(DeliveryChannel):
 
     async def send(self, view: DigestView) -> dict:
         card = build_feishu_card(view)
+        return await self._send_card(card)
+
+    async def send_markdown(self, title: str, body_md: str) -> dict:
+        """发一段 markdown 正文（综述用）。"""
+        return await self._send_card(build_markdown_card(title, body_md))
+
+    async def _send_card(self, card: dict) -> dict:
         cards = _chunk_cards(card)
         responses = []
         async with httpx.AsyncClient(timeout=self.timeout) as client:

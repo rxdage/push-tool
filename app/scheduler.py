@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -17,16 +16,13 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 
 from app.config import settings
-from app.curation.distill import distill
 from app.curation.pipeline import run_pipeline
 from app.db import SessionLocal
 from app.delivery.daily_excerpt import push_daily_academic
 from app.delivery.deliver import deliver_digest
+from app.delivery.review import push_review
 from app.ingestion.run import run as run_ingest
 from app.models import Digest, Subscription
-
-# 每月重生成的领域 skill（feed_type -> skill 名）
-SKILL_TARGETS = [("academic", "nanopore-radar"), ("industry", "sin-membrane-radar")]
 
 
 async def _already_ran_today(session, sub: Subscription) -> bool:
@@ -78,14 +74,13 @@ async def daily_academic_company_job() -> None:
     print(f"[daily-academic→公司群] {res}")
 
 
-async def monthly_skill_refresh_job() -> None:
-    """每月重生成学术 + 行业领域 skill（新为主 + 经典补充，token 可控）。"""
-    for feed, name in SKILL_TARGETS:
-        try:
-            res = await distill(feed, recent=120, name=name, out_dir=Path("skills") / name)
-            print(f"[skill-refresh] {name}: {res.get('status')} items={res.get('items')}")
-        except Exception as e:  # noqa: BLE001
-            print(f"[skill-refresh] {name} 失败: {e}")
+async def biweekly_review_job() -> None:
+    """每月 1 号、15 号：重生成学术+行业 skill，并把综述推到个人群 + 公司群。"""
+    try:
+        results = await push_review(settings)
+        print(f"[半月综述] {results}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[半月综述] 失败: {e}")
 
 
 async def load_jobs(scheduler: AsyncIOScheduler) -> int:
@@ -127,17 +122,17 @@ async def load_jobs(scheduler: AsyncIOScheduler) -> int:
         print(f"[scheduler] + 每日学术精选→公司群 cron='0 8 * * *' tz={settings.tz_default}")
         n_jobs += 1
 
-    # 每月 1 号 06:00 重生成领域 skill（学术 + 行业）
+    # 每月 1 号、15 号 09:00 重生成 skill + 半月综述推两群
     tz = ZoneInfo(settings.tz_default)
     scheduler.add_job(
-        monthly_skill_refresh_job,
-        trigger=CronTrigger(day=1, hour=6, minute=0, timezone=tz),
-        id="monthly-skill-refresh",
+        biweekly_review_job,
+        trigger=CronTrigger(day="1,15", hour=9, minute=0, timezone=tz),
+        id="biweekly-review",
         replace_existing=True,
         misfire_grace_time=6 * 3600,
         coalesce=True,
     )
-    print(f"[scheduler] + 每月重生成领域 skill cron='0 6 1 * *' tz={settings.tz_default}")
+    print(f"[scheduler] + 半月综述(skill+推两群) cron='0 9 1,15 * *' tz={settings.tz_default}")
     n_jobs += 1
 
     return n_jobs

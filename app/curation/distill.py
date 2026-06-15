@@ -145,6 +145,7 @@ async def distill(feed_type: str, recent: int, name: str, out_dir: Path) -> dict
         "status": "ok",
         "items": len(items),
         "out": str(out_dir / "SKILL.md"),
+        "body": body,  # 蒸馏正文（供综述推送复用，0 额外 token）
         "input_tokens": usage.input_tokens,
         "output_tokens": usage.output_tokens,
     }
