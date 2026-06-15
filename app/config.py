@@ -15,9 +15,18 @@ class Settings(BaseSettings):
     # Anthropic
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
 
-    # 飞书
+    # 飞书（个人群：行业日报 + 学术周报全文）
     feishu_webhook_url: str = Field(default="", alias="FEISHU_WEBHOOK_URL")
     feishu_webhook_secret: str = Field(default="", alias="FEISHU_WEBHOOK_SECRET")
+    # 飞书（公司群：每天早 8 点学术精选 5 条，复用周报已筛内容）
+    feishu_webhook_url_company: str = Field(
+        default="", alias="FEISHU_WEBHOOK_URL_COMPANY"
+    )
+    feishu_webhook_secret_company: str = Field(
+        default="", alias="FEISHU_WEBHOOK_SECRET_COMPANY"
+    )
+    # 每日学术精选条数
+    daily_academic_count: int = Field(default=5, alias="DAILY_ACADEMIC_COUNT")
 
     # DB
     database_url: str = Field(

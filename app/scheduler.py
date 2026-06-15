@@ -18,6 +18,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.curation.pipeline import run_pipeline
 from app.db import SessionLocal
+from app.delivery.daily_excerpt import push_daily_academic
 from app.delivery.deliver import deliver_digest
 from app.ingestion.run import run as run_ingest
 from app.models import Digest, Subscription
@@ -64,8 +65,16 @@ async def run_subscription_job(sub_id: int, *, fetch: bool = True) -> None:
             print(f"[job] subscription#{sub_id} 投递完成")
 
 
+async def daily_academic_company_job() -> None:
+    """每天早 8 点：从最新学术周报里取 N 条推公司群（复用摘要，0 LLM）。"""
+    async with SessionLocal() as session:
+        res = await push_daily_academic(session, settings)
+        await session.commit()
+    print(f"[daily-academic→公司群] {res}")
+
+
 async def load_jobs(scheduler: AsyncIOScheduler) -> int:
-    """读所有 active subscription，按 schedule_cron + tz 注册 cron job。"""
+    """读所有 active subscription 注册 cron job；另加每日学术精选→公司群任务。"""
     async with SessionLocal() as session:
         subs = (
             await session.execute(
@@ -86,7 +95,24 @@ async def load_jobs(scheduler: AsyncIOScheduler) -> int:
             coalesce=True,
         )
         print(f"[scheduler] + sub#{sub.id} {sub.name!r} cron={sub.schedule_cron!r} tz={sub.tz}")
-    return len(subs)
+
+    n_jobs = len(subs)
+
+    # 每日学术精选 → 公司群（仅在配了公司 webhook 时启用）
+    if settings.feishu_webhook_url_company:
+        tz = ZoneInfo(settings.tz_default)
+        scheduler.add_job(
+            daily_academic_company_job,
+            trigger=CronTrigger(hour=8, minute=0, timezone=tz),
+            id="daily-academic-company",
+            replace_existing=True,
+            misfire_grace_time=3600,
+            coalesce=True,
+        )
+        print(f"[scheduler] + 每日学术精选→公司群 cron='0 8 * * *' tz={settings.tz_default}")
+        n_jobs += 1
+
+    return n_jobs
 
 
 async def main() -> None:
