@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}问答{% endblock %}
+{% block heading %}文献问答{% endblock %}
+{% block content %}
+  <p class="muted">基于你收集的文献库（语义检索 + Claude 引用作答）。只依据库里内容回答，不足会如实说。</p>
+  <form method="get" action="/ask" style="margin:1rem 0;">
+    <input type="search" name="q" value="{{ q }}" style="width:72%;"
+           placeholder="例：controlled dielectric breakdown 制孔的优缺点？">
+    <button class="btn" type="submit">提问</button>
+  </form>
+
+  {% if error %}<p class="muted" style="color:#dc2626;">{{ error }}</p>{% endif %}
+
+  {% if result %}
+    <div class="card" style="white-space:pre-wrap;">{{ result.answer }}</div>
+    {% if result.sources %}
+      <h2>来源</h2>
+      {% for s in result.sources %}
+        <div class="muted">
+          [{{ s.n }}] ({{ s.year or "?" }})
+          {% if s.url %}<a href="{{ s.url }}" target="_blank">{{ s.title }}</a>
+          {% else %}{{ s.title }}{% endif %}
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endif %}
+{% endblock %}

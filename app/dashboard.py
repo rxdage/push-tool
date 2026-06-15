@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.curation.ask import answer_question
 from app.db import get_session
 from app.delivery.formatter import build_view, to_dashboard_payload
 from app.models import (
@@ -228,4 +229,24 @@ async def search_items(
         request,
 "items.html",
         {"request": request, "items": items, "q": q, "mode": mode, "error": error},
+    )
+
+
+@router.get("/ask", response_class=HTMLResponse)
+async def ask_page(
+    request: Request, q: str = "", session: AsyncSession = Depends(get_session)
+):
+    """文献问答（RAG）：检索收集的文献 + Claude 引用作答。"""
+    await current_user(session)
+    result = None
+    error = None
+    if q.strip():
+        try:
+            result = await answer_question(session, q.strip())
+        except Exception as e:  # noqa: BLE001
+            error = f"问答失败（多半是嵌入模型/接口不可用）：{e}"
+    return templates.TemplateResponse(
+        request,
+        "ask.html",
+        {"request": request, "q": q, "result": result, "error": error},
     )
