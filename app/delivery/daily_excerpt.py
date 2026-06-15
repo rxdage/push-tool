@@ -14,7 +14,7 @@ import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -25,6 +25,8 @@ from app.delivery.formatter import DigestView, ItemView, build_feishu_card
 from app.models import DeliveryLog, Digest, DigestItem, Item, Subscription
 
 COMPANY_CHANNEL = "feishu_company"
+# 个人群渠道（FeishuBot.kind）。公司群只取"个人群已收到"的那期，保证你优先。
+PERSONAL_CHANNEL = "feishu_bot"
 # 深度优先：每天先发最强的
 BUCKET_ORDER = {"deep": 0, "brief": 1, "classic": 2}
 
@@ -39,10 +41,20 @@ async def _latest_academic_digest(session: AsyncSession) -> Digest | None:
     ).scalars().first()
     if sub is None:
         return None
+    # 硬规则：只取"已成功投递到个人群"的那期 —— 保证你永远先于公司群拿到。
+    delivered_to_personal = exists().where(
+        DeliveryLog.digest_id == Digest.id,
+        DeliveryLog.channel == PERSONAL_CHANNEL,
+        DeliveryLog.status == "ok",
+    )
     return (
         await session.execute(
             select(Digest)
-            .where(Digest.subscription_id == sub.id, Digest.status == "ready")
+            .where(
+                Digest.subscription_id == sub.id,
+                Digest.status == "ready",
+                delivered_to_personal,
+            )
             .order_by(desc(Digest.run_at))
         )
     ).scalars().first()
