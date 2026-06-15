@@ -20,3 +20,6 @@ models_cache/
 
 .DS_Store
 *.log
+
+# 数据库备份（手动随机器迁移，勿入库）
+backups/
