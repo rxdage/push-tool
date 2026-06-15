@@ -52,12 +52,14 @@ SYSTEM = """你是该领域的资深分析师。下面给你一批本领域近�
 
 
 async def _load_corpus(
-    session: AsyncSession, feed_type: str, limit: int
+    session: AsyncSession, feed_type: str, recent: int
 ) -> list[tuple[str, Item]]:
-    """只取**已进过 digest 的策展条目**（过了相关性闸门、带改写摘要），按 item 去重。
+    """取**已进过 digest 的策展条目**（过了相关性闸门、带改写摘要），按 item 去重。
 
-    用策展集而非原始 items —— 期刊源（Nature Nano/ACS Nano…）原始内容主题极杂，
-    会污染蒸馏；digest 条目才是真正相关的本领域语料。
+    新为主、经典为补充、且 token 可控：取最近 `recent` 条"新"条目 + **全部**经典条目。
+    库再大，蒸馏输入也只随 recent 线性增长，不会爆 token。
+
+    用策展集而非原始 items —— 期刊源（Nature Nano/ACS Nano…）原始内容主题极杂，会污染蒸馏。
     """
     sub_ids = (
         await session.execute(
@@ -74,18 +76,17 @@ async def _load_corpus(
         .order_by(Item.published_at.desc().nullslast(), Item.fetched_at.desc())
     )
     seen: set[int] = set()
-    out: list[tuple[str, Item]] = []
+    news: list[tuple[str, Item]] = []
+    classics: list[tuple[str, Item]] = []
     for summary, classification, it in rows.all():
         if it.id in seen:
             continue
         seen.add(it.id)
-        # 把分类塞进 tags 视图，方便标 classic
-        if classification == "classic" and "classic" not in (it.tags or []):
+        is_classic = classification == "classic" or "classic" in (it.tags or [])
+        if is_classic and "classic" not in (it.tags or []):
             it.tags = (it.tags or []) + ["classic"]
-        out.append((summary or it.abstract or "", it))
-        if len(out) >= limit:
-            break
-    return out
+        (classics if is_classic else news).append((summary or it.abstract or "", it))
+    return news[:recent] + classics  # 新为主（最近 recent）+ 经典全收（补充）
 
 
 def _corpus_text(pairs: list[tuple[str, Item]]) -> str:
@@ -107,11 +108,11 @@ def _references_md(pairs: list[tuple[str, Item]]) -> str:
     return "\n".join(out)
 
 
-async def distill(feed_type: str, limit: int, name: str, out_dir: Path) -> dict:
+async def distill(feed_type: str, recent: int, name: str, out_dir: Path) -> dict:
     async with SessionLocal() as session:
-        items = await _load_corpus(session, feed_type, limit)
+        items = await _load_corpus(session, feed_type, recent)
     if not items:
-        return {"status": "empty", "reason": f"没有 {feed_type} 语料"}
+        return {"status": "empty", "reason": f"没有 {feed_type} 策展语料（先跑过 digest）"}
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     resp = await client.messages.create(
@@ -151,14 +152,14 @@ async def distill(feed_type: str, limit: int, name: str, out_dir: Path) -> dict:
 
 async def _main(args) -> None:
     out_dir = Path(args.out or f"skills/{args.name}")
-    res = await distill(args.feed, args.limit, args.name, out_dir)
+    res = await distill(args.feed, args.recent, args.name, out_dir)
     print(res)
 
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--feed", default="academic")
-    p.add_argument("--limit", type=int, default=400)
+    p.add_argument("--recent", type=int, default=120, help="取最近 N 条新条目 + 全部经典")
     p.add_argument("--name", default="nanopore-radar")
     p.add_argument("--out", default="")
     args = p.parse_args()
