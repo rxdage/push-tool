@@ -9,10 +9,12 @@ S2_API_KEY（settings.s2_api_key）可选，填了提高限速。
 """
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timezone
+
 import httpx
 
 from app.ingestion.base import RawItem, SourceAdapter
-from datetime import datetime, timezone
 
 S2_SEARCH = "https://api.semanticscholar.org/graph/v1/paper/search"
 DEFAULT_FIELDS = ["title", "abstract", "year", "citationCount", "externalIds", "url"]
@@ -33,14 +35,19 @@ class SemanticScholarAdapter(SourceAdapter):
         if api_key:
             headers["x-api-key"] = api_key
 
+        params = {"query": query, "fields": ",".join(fields), "limit": limit}
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            resp = await client.get(
-                S2_SEARCH,
-                params={"query": query, "fields": ",".join(fields), "limit": limit},
-                headers=headers,
-            )
-            resp.raise_for_status()
-            data = resp.json().get("data", [])
+            # 无 key 时 S2 共享限速易 429；退避重试几次。
+            data = []
+            for i in range(4):
+                resp = await client.get(S2_SEARCH, params=params, headers=headers)
+                if resp.status_code in (429, 500, 502, 503) and i < 3:
+                    wait = float(resp.headers.get("retry-after", 2 ** i))
+                    await asyncio.sleep(min(wait, 10))
+                    continue
+                resp.raise_for_status()
+                data = resp.json().get("data", [])
+                break
 
         items: list[RawItem] = []
         for p in data:

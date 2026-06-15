@@ -41,6 +41,30 @@ async def _allowed_by_robots(client: httpx.AsyncClient, url: str) -> bool:
 class HtmlScrapeAdapter(SourceAdapter):
     kind = "html"
 
+    async def _get_with_retry(
+        self, client: httpx.AsyncClient, url: str, attempts: int = 3
+    ) -> str:
+        """抓页面，对网络抖动 / 5xx 重试（指数退避）；4xx 立即抛。"""
+        last_exc: Exception | None = None
+        for i in range(attempts):
+            try:
+                resp = await client.get(url)
+                if resp.status_code >= 500:
+                    raise httpx.HTTPStatusError(
+                        f"{resp.status_code}", request=resp.request, response=resp
+                    )
+                resp.raise_for_status()
+                return resp.text
+            except (httpx.TransportError, httpx.TimeoutException, httpx.HTTPStatusError) as e:
+                # 4xx（除 429）不重试
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                if status is not None and 400 <= status < 500 and status != 429:
+                    raise
+                last_exc = e
+                if i < attempts - 1:
+                    await asyncio.sleep(2 ** i)  # 1s, 2s
+        raise last_exc  # type: ignore[misc]
+
     async def fetch(self) -> list[RawItem]:
         url = self.config.get("url")
         if not url:
@@ -55,9 +79,7 @@ class HtmlScrapeAdapter(SourceAdapter):
         ) as client:
             if respect_robots and not await _allowed_by_robots(client, url):
                 raise PermissionError(f"robots 禁止抓取 {url}")
-            resp = await client.get(url)
-            resp.raise_for_status()
-            html = resp.text
+            html = await self._get_with_retry(client, url)
             await asyncio.sleep(rate_limit_s)
 
         soup = await asyncio.to_thread(BeautifulSoup, html, "html.parser")
