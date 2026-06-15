@@ -45,6 +45,20 @@ services:
     # 每订阅一个 tz-aware cron job：抓取 → 筛选 → 投递
     command: ["python", "-m", "app.scheduler"]
 
+  # 飞书问答 bot（默认不启动；填好 FEISHU_APP_ID/SECRET 后用：
+  #   docker compose --profile qa up -d qa-bot）
+  qa-bot:
+    build: .
+    env_file: .env
+    profiles: ["qa"]
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+      - model_cache:/root/.cache
+    command: ["python", "-m", "app.delivery.feishu_qa_bot"]
+
 volumes:
   pgdata:
   model_cache:

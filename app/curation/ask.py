@@ -103,7 +103,14 @@ async def answer_question(
     )
     answer = next((b.text for b in resp.content if b.type == "text"), "")
     sources = [vars(src) for src, _ in pairs]
-    return {"answer": answer, "sources": sources}
+    return {
+        "answer": answer,
+        "sources": sources,
+        "usage": {
+            "input_tokens": resp.usage.input_tokens,
+            "output_tokens": resp.usage.output_tokens,
+        },
+    }
 
 
 async def _main(question: str) -> None:

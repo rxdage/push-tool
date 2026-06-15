@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     # 每日学术精选条数
     daily_academic_count: int = Field(default=5, alias="DAILY_ACADEMIC_COUNT")
 
+    # 飞书问答 bot（应用机器人，长连接；留空则不启用）
+    feishu_app_id: str = Field(default="", alias="FEISHU_APP_ID")
+    feishu_app_secret: str = Field(default="", alias="FEISHU_APP_SECRET")
+    qa_model: str = Field(default="claude-haiku-4-5", alias="QA_MODEL")
+    # 省钱闸
+    qa_daily_limit_per_user: int = Field(default=15, alias="QA_DAILY_LIMIT_PER_USER")
+    qa_daily_limit_total: int = Field(default=100, alias="QA_DAILY_LIMIT_TOTAL")
+    qa_monthly_budget_usd: float = Field(default=5.0, alias="QA_MONTHLY_BUDGET_USD")
+
     # DB
     database_url: str = Field(
         default="postgresql+asyncpg://push:push@localhost:5432/pushtool",

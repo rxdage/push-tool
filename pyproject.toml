@@ -29,6 +29,8 @@ dependencies = [
     "sentence-transformers>=3.3",
     # scheduling (Phase 5)
     "apscheduler>=3.10",
+    # 飞书问答 bot（长连接；仅 qa-bot 服务用）
+    "lark-oapi>=1.4",
 ]
 
 [project.optional-dependencies]

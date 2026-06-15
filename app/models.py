@@ -229,3 +229,21 @@ class Channel(Base):
     )
     kind: Mapped[str] = mapped_column(String(40))
     config_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class QaLog(Base):
+    """飞书问答 bot 的用量记录：用于每日上限 + 月度预算硬开关（持久、重启不丢）。"""
+
+    __tablename__ = "qa_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[str] = mapped_column(String(120), index=True)
+    user_id: Mapped[str] = mapped_column(String(120), index=True)
+    question: Mapped[str] = mapped_column(Text, default="")
+    answered: Mapped[bool] = mapped_column(Boolean, default=False)
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
