@@ -54,7 +54,8 @@ async def list_digests(request: Request, session: AsyncSession = Depends(get_ses
         {"digest": d, "subscription": s, "count": c} for d, s, c in rows
     ]
     return templates.TemplateResponse(
-        "digests.html", {"request": request, "digests": digests}
+        request,
+"digests.html", {"request": request, "digests": digests}
     )
 
 
@@ -71,7 +72,8 @@ async def read_digest(
         raise HTTPException(403, "无权访问")
     view = await build_view(session, digest)
     return templates.TemplateResponse(
-        "digest.html",
+        request,
+"digest.html",
         {"request": request, "digest": digest, "payload": to_dashboard_payload(view)},
     )
 
@@ -98,7 +100,8 @@ async def list_subscriptions(
         ).all()
     )
     return templates.TemplateResponse(
-        "subscriptions.html",
+        request,
+"subscriptions.html",
         {"request": request, "subscriptions": subs, "source_counts": counts},
     )
 
@@ -114,7 +117,8 @@ async def toggle_subscription(
     sub.active = not sub.active
     await session.commit()
     return templates.TemplateResponse(
-        "_toggle.html",
+        request,
+"_toggle.html",
         {"request": request, "active": sub.active, "kind": "subscriptions", "id": sub.id},
     )
 
@@ -132,7 +136,8 @@ async def list_sources(request: Request, session: AsyncSession = Depends(get_ses
     ).all()
     sources = [{"source": s, "sub_name": n} for s, n in rows]
     return templates.TemplateResponse(
-        "sources.html", {"request": request, "sources": sources}
+        request,
+"sources.html", {"request": request, "sources": sources}
     )
 
 
@@ -153,7 +158,8 @@ async def toggle_source(
     src.active = not src.active
     await session.commit()
     return templates.TemplateResponse(
-        "_toggle.html",
+        request,
+"_toggle.html",
         {"request": request, "active": src.active, "kind": "sources", "id": src.id},
     )
 
@@ -219,6 +225,7 @@ async def search_items(
         items = (await session.execute(stmt)).scalars().all()
 
     return templates.TemplateResponse(
-        "items.html",
+        request,
+"items.html",
         {"request": request, "items": items, "q": q, "mode": mode, "error": error},
     )
