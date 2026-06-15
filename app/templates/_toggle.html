@@ -1,0 +1,7 @@
+<span id="{{ kind }}-{{ id }}-toggle">
+  {% if active %}<span class="on">● 开</span>{% else %}<span class="off">○ 关</span>{% endif %}
+  <button class="btn"
+          hx-post="/{{ kind }}/{{ id }}/toggle"
+          hx-target="#{{ kind }}-{{ id }}-toggle"
+          hx-swap="outerHTML">切换</button>
+</span>

@@ -1,0 +1,32 @@
+# 固态纳米孔经典论文人工种子（第 5 节）。每周轮换 1-2 篇"经典回顾"，S2 高引用兜底。
+# external_id 优先填 DOI；S2 兜底时用 citationCount 排序。
+- title: Characterization of individual polynucleotide molecules using a membrane channel
+  authors: Kasianowicz, Brandin, Branton, Deamer
+  year: 1996
+  doi: 10.1073/pnas.93.24.13770
+  note: 纳米孔传感开山之作（生物孔，奠基）
+- title: Ion-beam sculpting at nanometre length scales
+  authors: Li, Stein, McMullan, Branton, Aziz, Golovchenko
+  year: 2001
+  doi: 10.1038/35102510
+  note: 固态纳米孔制造的里程碑（离子束）
+- title: Fabrication of solid-state nanopores with single-nanometre precision
+  authors: Storm, Chen, Ling, Zandbergen, Dekker
+  year: 2003
+  doi: 10.1038/nmat941
+  note: TEM 收缩法制孔，可制造性经典
+- title: Slowing DNA translocation in a solid-state nanopore
+  authors: Fologea, Uplinger, Thomas, McNabb, Li
+  year: 2005
+  doi: 10.1021/nl048372n
+  note: 调控易位速度，传感应用经典
+- title: DNA translocation through graphene nanopores
+  authors: Schneider et al.
+  year: 2010
+  doi: 10.1021/nl102069z
+  note: 2D 材料纳米孔代表作
+- title: Controlled fabrication of nanopores by controlled dielectric breakdown
+  authors: Kwok, Briggs, Tabard-Cossa
+  year: 2014
+  doi: 10.1371/journal.pone.0092880
+  note: CDB 制孔，低成本可制造性关键

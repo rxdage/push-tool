@@ -1,0 +1,63 @@
+# 学术周报源（第 5 节）。arXiv/PubMed/S2 走 API；期刊走 RSS。
+- kind: arxiv
+  weight: 1.2
+  config:
+    name: arXiv cond-mat.mes-hall + bio-ph + app-ph
+    categories: [cond-mat.mes-hall, physics.bio-ph, physics.app-ph]
+    query: nanopore OR "solid-state nanopore" OR "ionic current"
+    max_results: 80
+- kind: pubmed
+  weight: 1.0
+  config:
+    name: PubMed/PMC E-utilities
+    term: "solid-state nanopore OR nanopore sequencing OR nanopore sensing"
+    max_results: 60
+- kind: rss
+  weight: 0.9
+  config:
+    name: bioRxiv (biophysics)
+    url: https://connect.biorxiv.org/biorxiv_xml.php?subject=biophysics
+- kind: s2
+  weight: 1.0
+  config:
+    name: Semantic Scholar 引用图谱
+    query: solid-state nanopore
+    fields: [title, abstract, year, citationCount, externalIds, url]
+    limit: 60
+
+# 期刊 RSS
+- kind: rss
+  weight: 1.1
+  config:
+    name: Nature Nanotechnology
+    url: https://www.nature.com/nnano.rss
+- kind: rss
+  weight: 1.1
+  config:
+    name: Nature Materials
+    url: https://www.nature.com/nmat.rss
+- kind: rss
+  weight: 1.0
+  config:
+    name: ACS Nano
+    url: https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ancac3
+- kind: rss
+  weight: 1.0
+  config:
+    name: Nano Letters
+    url: https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=nalefd
+- kind: rss
+  weight: 0.9
+  config:
+    name: Small
+    url: https://onlinelibrary.wiley.com/feed/16136829/most-recent
+- kind: rss
+  weight: 0.9
+  config:
+    name: ACS Sensors
+    url: https://pubs.acs.org/action/showFeed?type=axatoc&feed=rss&jc=ascefj
+- kind: rss
+  weight: 0.9
+  config:
+    name: Lab on a Chip
+    url: http://feeds.rsc.org/rss/lc

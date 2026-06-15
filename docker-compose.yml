@@ -1,0 +1,50 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: push
+      POSTGRES_PASSWORD: push
+      POSTGRES_DB: pushtool
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U push -d pushtool"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+      - model_cache:/root/.cache  # 缓存本地嵌入模型权重
+    # 启动前跑迁移，再起 web
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  scheduler:
+    build: .
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_started
+    volumes:
+      - ./:/app
+      - model_cache:/root/.cache
+    # 每订阅一个 tz-aware cron job：抓取 → 筛选 → 投递
+    command: ["python", "-m", "app.scheduler"]
+
+volumes:
+  pgdata:
+  model_cache:

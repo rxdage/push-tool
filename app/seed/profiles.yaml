@@ -1,0 +1,53 @@
+# 两个 InterestProfile 种子（第 5 节）。这是"精华"筛选的大脑配置——数据，不写死。
+- name: 超薄 SiN 膜 / 微纳芯片平台
+  description: >
+    聚焦"超薄 SiN 悬空膜微纳芯片平台"的产业情报雷达：TEM/电镜支持膜耗材、
+    in-situ/液体池 TEM、cryo-EM 载网、X-ray 窗、EV/外泌体/液体活检膜、
+    固态纳米孔（关注）、微纳代工/MPW、电镜国产替代政策与采购线索。
+  keywords:
+    - 超薄 SiN 膜
+    - TEM/电镜 支持膜耗材
+    - in-situ/液体池 TEM
+    - cryo-EM 载网
+    - X-ray 窗
+    - EV/外泌体/液体活检膜
+    - 固态纳米孔(watch)
+    - 微纳代工/MPW
+    - 电镜国产替代政策与采购
+    # 竞品监控
+    - CleanSin
+    - 港湾半导体
+    - Norcada
+    - Ted Pella
+    - EMS
+    - Quantifoil
+    - SiMPore
+    - Amptek
+    - Moxtek
+    - DENSsolutions
+    - Protochips
+  must_have:
+    - 与"膜/电镜耗材/国产替代/采购线索"相关
+  exclude:
+    - 纯 IC 设计
+    - 与膜无关的 MEMS（麦克风/IMU/微镜）除非涉及工艺或产能
+  notes: 行业源每条带"行动/关注"标签；行动项加一句 ≤25 字 "这对你意味着什么"。
+
+- name: 固态纳米孔
+  description: >
+    固态纳米孔（solid-state nanopore）研究雷达：新进展 + 经典精华。
+    优先级最高：制造工艺 / 可制造性 / 传感应用 / 小批量验证。
+  keywords:
+    - solid-state nanopore
+    - 2D-material nanopore (MoS2/graphene/hBN)
+    - nanopore fabrication (controlled dielectric breakdown / TEM drilling / ion-beam)
+    - DNA/protein sequencing
+    - ionic current sensing
+    - nanopore + machine learning
+  must_have:
+    - 制造工艺
+    - 可制造性
+    - 传感应用
+    - 小批量验证
+  exclude: []
+  notes: 经典论文走 classics_nanopore.yaml 人工种子 + S2 高引用兜底，每周轮换 1-2 篇。

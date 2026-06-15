@@ -1,0 +1,4 @@
+# 统一行尾：仓库内存 LF；Windows 工作区可按需转 CRLF。
+* text=auto
+# Shell 脚本必须保持 LF（否则 Linux 上 shebang 会坏）
+*.sh text eol=lf

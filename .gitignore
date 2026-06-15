@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+.env
+.venv/
+venv/
+.python-version
+
+# 本地模型缓存
+.cache/
+models_cache/
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+.DS_Store
+*.log

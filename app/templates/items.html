@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}检索{% endblock %}
+{% block heading %}条目检索{% endblock %}
+{% block content %}
+  <form method="get" action="/items" style="margin-bottom:1rem;">
+    <input type="search" name="q" value="{{ q }}" placeholder="检索条目">
+    <label class="muted" style="margin:0 .5rem;">
+      <input type="radio" name="mode" value="text" {% if mode != 'semantic' %}checked{% endif %}> 标题
+    </label>
+    <label class="muted">
+      <input type="radio" name="mode" value="semantic" {% if mode == 'semantic' %}checked{% endif %}> 语义(pgvector)
+    </label>
+    <button class="btn" type="submit">搜索</button>
+  </form>
+  {% if error %}<p class="muted" style="color:#dc2626;">{{ error }}</p>{% endif %}
+  <p class="muted">{{ items|length }} 条结果{% if mode == 'semantic' %} · 语义近邻{% endif %}</p>
+  {% for it in items %}
+    <div class="card">
+      {% if it.url %}<a href="{{ it.url }}" target="_blank">{{ it.title }}</a>
+      {% else %}{{ it.title }}{% endif %}
+      <div class="muted">
+        {{ it.published_at.strftime("%Y-%m-%d") if it.published_at else "—" }}
+        {% if it.tags %} · {{ it.tags|join(", ") }}{% endif %}
+      </div>
+    </div>
+  {% else %}
+    <p class="muted">无结果。</p>
+  {% endfor %}
+{% endblock %}

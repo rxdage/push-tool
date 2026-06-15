@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Digests{% endblock %}
+{% block heading %}Digests{% endblock %}
+{% block content %}
+  {% if not digests %}
+    <p class="muted">还没有 digest。跑 <code>python -m app.run_subscription &lt;id&gt;</code> 生成一期。</p>
+  {% endif %}
+  {% for row in digests %}
+    <div class="card">
+      <a href="/digest/{{ row.digest.id }}"><strong>{{ row.subscription.name }}</strong></a>
+      <span class="muted">
+        · {{ row.digest.run_at.strftime("%Y-%m-%d %H:%M") if row.digest.run_at else "" }}
+        · {{ row.count }} 条 · {{ row.digest.status }}
+      </span>
+    </div>
+  {% endfor %}
+{% endblock %}

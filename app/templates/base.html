@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>push-tool · {% block title %}{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root { --fg:#1c1c1e; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+           color: var(--fg); max-width: 880px; margin: 0 auto; padding: 1rem 1.2rem 4rem; line-height: 1.55; }
+    header nav { display:flex; gap:1rem; padding:.6rem 0 1rem; border-bottom:1px solid var(--line); margin-bottom:1.2rem; flex-wrap:wrap; }
+    header nav a { text-decoration:none; color:var(--muted); font-weight:600; }
+    header nav a:hover { color:var(--accent); }
+    h1 { font-size:1.35rem; } h2 { font-size:1.05rem; margin-top:1.6rem; }
+    a { color: var(--accent); }
+    .card { border:1px solid var(--line); border-radius:10px; padding:.9rem 1rem; margin:.6rem 0; }
+    .muted { color:var(--muted); font-size:.85rem; }
+    .label-action { color:#dc2626; font-weight:600; }
+    .label-watch { color:#d97706; font-weight:600; }
+    .why { background:#f8fafc; border-left:3px solid var(--accent); padding:.3rem .6rem; margin-top:.4rem; font-size:.9rem; }
+    table { border-collapse: collapse; width:100%; }
+    td, th { border-bottom:1px solid var(--line); padding:.5rem .4rem; text-align:left; font-size:.9rem; vertical-align:top; }
+    .btn { cursor:pointer; border:1px solid var(--line); background:#fff; border-radius:6px; padding:.2rem .6rem; font-size:.8rem; }
+    .on { color:#16a34a; font-weight:600; } .off { color:#9ca3af; }
+    input[type=search] { padding:.45rem .6rem; border:1px solid var(--line); border-radius:8px; width:60%; }
+  </style>
+</head>
+<body>
+  <header>
+    <nav>
+      <a href="/digests">Digests</a>
+      <a href="/subscriptions">订阅</a>
+      <a href="/sources">源</a>
+      <a href="/items">检索</a>
+      <a href="/docs">API</a>
+    </nav>
+  </header>
+  <main>
+    <h1>{% block heading %}{% endblock %}</h1>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

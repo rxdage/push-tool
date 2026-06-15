@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}源{% endblock %}
+{% block heading %}源{% endblock %}
+{% block content %}
+  <table>
+    <thead><tr><th>订阅</th><th>kind</th><th>名称</th><th>权重</th><th>状态</th></tr></thead>
+    <tbody>
+    {% for row in sources %}
+      <tr>
+        <td>{{ row.sub_name }}</td>
+        <td>{{ row.source.kind }}</td>
+        <td>{{ row.source.config_json.get("name", "") }}</td>
+        <td>{{ "%.1f"|format(row.source.weight) }}</td>
+        <td>
+          {% with active=row.source.active, kind="sources", id=row.source.id %}
+            {% include "_toggle.html" %}
+          {% endwith %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

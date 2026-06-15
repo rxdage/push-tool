@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}订阅{% endblock %}
+{% block heading %}订阅{% endblock %}
+{% block content %}
+  <table>
+    <thead><tr><th>名称</th><th>类型</th><th>cron</th><th>tz</th><th>配额(deep/brief/classic)</th><th>源</th><th>状态</th></tr></thead>
+    <tbody>
+    {% for s in subscriptions %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td>{{ s.feed_type }}</td>
+        <td><code>{{ s.schedule_cron }}</code></td>
+        <td>{{ s.tz }}</td>
+        <td>{{ s.max_deep }}/{{ s.max_brief }}/{{ s.max_classic }}</td>
+        <td>{{ source_counts.get(s.id, 0) }}</td>
+        <td>
+          {% with active=s.active, kind="subscriptions", id=s.id %}
+            {% include "_toggle.html" %}
+          {% endwith %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

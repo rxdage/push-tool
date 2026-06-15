@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ payload.subscription }}{% endblock %}
+{% block heading %}{{ payload.subscription }} · {{ payload.date }}{% endblock %}
+{% block content %}
+  <p class="muted"><a href="/digests">← 返回</a> · 状态 {{ digest.status }}</p>
+
+  {% macro item_card(it, deep=False) %}
+    <div class="card">
+      {% if it.url %}<a href="{{ it.url }}" target="_blank"><strong>{{ it.title }}</strong></a>
+      {% else %}<strong>{{ it.title }}</strong>{% endif %}
+      {% if it.action_label == "action" %}<span class="label-action"> 🔴 行动</span>
+      {% elif it.action_label == "watch" %}<span class="label-watch"> 🟡 关注</span>{% endif %}
+      <div>{{ it.summary }}</div>
+      {% if it.why_it_matters %}<div class="why">💡 {{ it.why_it_matters }}</div>{% endif %}
+    </div>
+  {% endmacro %}
+
+  {% if payload.deep %}
+    <h2>深度（{{ payload.deep|length }}）</h2>
+    {% for it in payload.deep %}{{ item_card(it, deep=True) }}{% endfor %}
+  {% endif %}
+
+  {% if payload.brief %}
+    <h2>简报（{{ payload.brief|length }}）</h2>
+    {% for it in payload.brief %}{{ item_card(it) }}{% endfor %}
+  {% endif %}
+
+  {% if payload.classic %}
+    <h2>经典回顾（{{ payload.classic|length }}）</h2>
+    {% for it in payload.classic %}{{ item_card(it) }}{% endfor %}
+  {% endif %}
+
+  {% if not payload.deep and not payload.brief and not payload.classic %}
+    <p class="muted">本期没有命中精华条目。</p>
+  {% endif %}
+{% endblock %}
