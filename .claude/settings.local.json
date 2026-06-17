@@ -3,7 +3,9 @@
     "allow": [
       "Bash(dir)",
       "Bash(python -m py_compile app/*.py app/seed/*.py migrations/env.py migrations/versions/0001_initial.py)",
-      "Bash(python -c \"import yaml,glob; [print\\('OK',f,'->',len\\(yaml.safe_load\\(open\\(f,encoding='utf-8'\\)\\)\\),'entries'\\) for f in glob.glob\\('app/seed/*.yaml'\\)]\")"
+      "Bash(python -c \"import yaml,glob; [print\\('OK',f,'->',len\\(yaml.safe_load\\(open\\(f,encoding='utf-8'\\)\\)\\),'entries'\\) for f in glob.glob\\('app/seed/*.yaml'\\)]\")",
+      "Bash(git push:*)",
+      "PowerShell(git push:*)"
     ]
   }
 }
