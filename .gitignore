@@ -13,6 +13,8 @@ venv/
 # 本地模型缓存
 .cache/
 models_cache/
+models/
+_warm_model.py
 
 .pytest_cache/
 .ruff_cache/
