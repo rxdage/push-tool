@@ -18,6 +18,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.curation.pipeline import run_pipeline
 from app.db import SessionLocal
+from app.delivery import selfheal
 from app.delivery.daily_excerpt import push_daily_academic
 from app.delivery.deliver import deliver_digest
 from app.delivery.review import push_review
@@ -83,6 +84,84 @@ async def biweekly_review_job() -> None:
         print(f"[半月综述] 失败: {e}")
 
 
+async def watchdog_job() -> None:
+    """补推校验：核对今天该推的是否都成功投递；缺则补、补不上则告警。
+
+    推送时段每 15 分钟跑一遍，幂等：已成功投递的直接跳过；只补真正漏掉/失败的。
+    """
+    tz = ZoneInfo(settings.tz_default)
+    now = datetime.now(tz)
+    healed: list[str] = []
+    failed: list[str] = []
+
+    async with SessionLocal() as session:
+        subs = (
+            await session.execute(
+                select(Subscription).where(Subscription.active.is_(True))
+            )
+        ).scalars().all()
+
+    # 1) 各订阅（行业日报 / 学术周报）→ 个人群
+    for sub in subs:
+        sub_tz = ZoneInfo(sub.tz or settings.tz_default)
+        if selfheal.cron_fired_today(sub.schedule_cron, sub_tz, datetime.now(sub_tz)) is None:
+            continue  # 今天本来就不该推（或还没到补救时间）
+        async with SessionLocal() as session:
+            digest = await selfheal.todays_digest(session, sub.id, sub_tz)
+            already = digest is not None and await selfheal.delivered_ok(
+                session, digest.id, selfheal.PERSONAL_CHANNEL
+            )
+            digest_id = digest.id if digest else None
+        if already:
+            continue
+        label = f"{sub.name}(个人群)"
+        try:
+            if digest_id is None:
+                await run_subscription_job(sub.id)  # 没生成 → 整套重跑（含投递）
+            else:
+                async with SessionLocal() as session:  # 生成了但没投成 → 重投
+                    d = await session.get(Digest, digest_id)
+                    await deliver_digest(session, d, settings)
+                    await session.commit()
+            async with SessionLocal() as session:
+                d2 = await selfheal.todays_digest(session, sub.id, sub_tz)
+                ok = d2 is not None and await selfheal.delivered_ok(
+                    session, d2.id, selfheal.PERSONAL_CHANNEL
+                )
+            (healed if ok else failed).append(label)
+        except Exception as e:  # noqa: BLE001
+            print(f"[watchdog] {label} 补救失败: {e}")
+            failed.append(label)
+
+    # 2) 每日学术精选 → 公司群（每天 08:00）
+    if settings.feishu_webhook_url_company and selfheal.cron_fired_today(
+        "0 8 * * *", tz, now
+    ):
+        async with SessionLocal() as session:
+            done = await selfheal.company_pushed_ok_today(session, tz)
+        if not done:
+            label = "每日学术精选(公司群)"
+            try:
+                await daily_academic_company_job()
+                async with SessionLocal() as session:
+                    if await selfheal.company_pushed_ok_today(session, tz):
+                        healed.append(label)
+                    # daily_academic 可能因"本期已发完"返回 skip（非失败），不算漏推
+            except Exception as e:  # noqa: BLE001
+                print(f"[watchdog] {label} 补救失败: {e}")
+                failed.append(label)
+
+    if healed:
+        print(f"[watchdog] 已补推: {healed}")
+    if failed and settings.selfheal_alert:
+        today = now.strftime("%Y-%m-%d")
+        fresh = [f for f in failed if selfheal.should_alert(f"{today}:{f}")]
+        if fresh:
+            await selfheal.send_alert(settings, fresh)
+    if not healed and not failed:
+        print("[watchdog] 核对完成：今日推送均已就绪。")
+
+
 async def load_jobs(scheduler: AsyncIOScheduler) -> int:
     """读所有 active subscription 注册 cron job；另加每日学术精选→公司群任务。"""
     async with SessionLocal() as session:
@@ -134,6 +213,17 @@ async def load_jobs(scheduler: AsyncIOScheduler) -> int:
     )
     print(f"[scheduler] + 半月综述(skill+推两群) cron='0 9 1,15 * *' tz={settings.tz_default}")
     n_jobs += 1
+
+    # 推送自愈 watchdog：推送时段每 15 分钟核对、补推、失败告警（不计入订阅数）
+    scheduler.add_job(
+        watchdog_job,
+        trigger=CronTrigger(minute="*/15", hour="7-11,20-22", timezone=tz),
+        id="selfheal-watchdog",
+        replace_existing=True,
+        misfire_grace_time=600,
+        coalesce=True,
+    )
+    print("[scheduler] + 推送自愈 watchdog cron='*/15 7-11,20-22 * * *'")
 
     return n_jobs
 

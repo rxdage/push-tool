@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -13,11 +14,14 @@ import time
 
 import httpx
 
+from app.config import settings as _settings
 from app.delivery.base import DeliveryChannel
 from app.delivery.formatter import DigestView, build_feishu_card
 
 # 留余量，飞书上限 20KB
 MAX_BODY_BYTES = 18000
+# 可重试的飞书业务错误码（频率限制）
+RETRYABLE_FEISHU_CODES = {11232}
 
 
 def gen_sign(timestamp: int, secret: str) -> str:
@@ -100,12 +104,32 @@ def build_markdown_card(title: str, body_md: str) -> dict:
 class FeishuBot(DeliveryChannel):
     kind = "feishu_bot"
 
-    def __init__(self, webhook_url: str, secret: str = "", timeout: float = 15.0):
+    def __init__(
+        self,
+        webhook_url: str,
+        secret: str = "",
+        timeout: float = 15.0,
+        *,
+        retry_attempts: int | None = None,
+        retry_base_delay: float | None = None,
+        inter_card_delay: float = 0.5,
+    ):
         if not webhook_url:
             raise ValueError("FEISHU_WEBHOOK_URL 未配置")
         self.webhook_url = webhook_url
         self.secret = secret
         self.timeout = timeout
+        self.retry_attempts = (
+            retry_attempts
+            if retry_attempts is not None
+            else _settings.delivery_retry_attempts
+        )
+        self.retry_base_delay = (
+            retry_base_delay
+            if retry_base_delay is not None
+            else _settings.delivery_retry_base_delay
+        )
+        self.inter_card_delay = inter_card_delay
 
     def _payload(self, card: dict) -> dict:
         payload = {"msg_type": "interactive", "card": card}
@@ -116,14 +140,36 @@ class FeishuBot(DeliveryChannel):
         return payload
 
     async def _post(self, client: httpx.AsyncClient, payload: dict) -> dict:
-        resp = await client.post(self.webhook_url, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        # 成功：code==0（新）或 StatusCode==0（旧）
-        ok = data.get("code") == 0 or data.get("StatusCode") == 0
-        if not ok:
+        """发送一张卡片；限流(11232)/网络错误/5xx 自动退避重试。"""
+        attempts = max(1, self.retry_attempts)
+        last: Exception | None = None
+        for i in range(attempts):
+            if i:
+                delay = self.retry_base_delay * (2 ** (i - 1))
+                print(f"  ↻ 投递重试 {i}/{attempts - 1}，{delay:.0f}s 后再试…（{last}）")
+                await asyncio.sleep(delay)
+            try:
+                resp = await client.post(self.webhook_url, json=payload)
+            except httpx.HTTPError as e:
+                last = RuntimeError(f"网络错误: {e}")
+                continue
+            if resp.status_code >= 500:
+                last = RuntimeError(f"飞书 HTTP {resp.status_code}")
+                continue
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPError as e:  # 4xx：客户端错误，重试无意义
+                raise RuntimeError(f"飞书 HTTP 错误: {e}") from e
+            data = resp.json()
+            # 成功：code==0（新）或 StatusCode==0（旧）
+            if data.get("code") == 0 or data.get("StatusCode") == 0:
+                return data
+            # 业务错误：限流可重试，其余直接抛
+            if data.get("code") in RETRYABLE_FEISHU_CODES:
+                last = RuntimeError(f"飞书限流: {data}")
+                continue
             raise RuntimeError(f"飞书返回错误: {data}")
-        return data
+        raise last or RuntimeError("飞书发送失败（重试用尽）")
 
     async def send(self, view: DigestView) -> dict:
         card = build_feishu_card(view)
@@ -137,6 +183,8 @@ class FeishuBot(DeliveryChannel):
         cards = _chunk_cards(card)
         responses = []
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for c in cards:
+            for i, c in enumerate(cards):
+                if i and self.inter_card_delay:
+                    await asyncio.sleep(self.inter_card_delay)  # 多卡片间隔，降限流概率
                 responses.append(await self._post(client, self._payload(c)))
         return {"status": "ok", "parts": len(cards), "response": responses}

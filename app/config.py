@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     # 每日学术精选条数
     daily_academic_count: int = Field(default=5, alias="DAILY_ACADEMIC_COUNT")
 
+    # 投递自愈：发送失败自动退避重试（覆盖飞书限流 11232 / 网络抖动）
+    delivery_retry_attempts: int = Field(default=4, alias="DELIVERY_RETRY_ATTEMPTS")
+    delivery_retry_base_delay: float = Field(
+        default=5.0, alias="DELIVERY_RETRY_BASE_DELAY"
+    )
+    # watchdog 多次补救仍失败时，往个人群发告警
+    selfheal_alert: bool = Field(default=True, alias="SELFHEAL_ALERT")
+
     # 飞书问答 bot（应用机器人，长连接；留空则不启用）
     feishu_app_id: str = Field(default="", alias="FEISHU_APP_ID")
     feishu_app_secret: str = Field(default="", alias="FEISHU_APP_SECRET")
