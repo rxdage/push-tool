@@ -15,6 +15,7 @@ venv/
 models_cache/
 models/
 _warm_model.py
+_netcheck.py
 
 .pytest_cache/
 .ruff_cache/
