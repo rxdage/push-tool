@@ -75,6 +75,87 @@ async def daily_academic_company_job() -> None:
     print(f"[daily-academic→公司群] {res}")
 
 
+async def daily_industry_company_job(dry_run: bool = False) -> dict | None:
+    """工作日 07:45：把当天「行业日报」digest 完整推到公司群（07:30 生成后）。幂等。
+
+    用独立渠道名 feishu_company_industry，避免和"学术精选→公司群"的自愈核对相互干扰。
+    """
+    from app.delivery.feishu_bot import FeishuBot
+    from app.delivery.formatter import build_view
+    from app.models import DeliveryLog
+
+    channel = "feishu_company_industry"
+    async with SessionLocal() as session:
+        sub = (
+            await session.execute(
+                select(Subscription).where(
+                    Subscription.feed_type == "industry",
+                    Subscription.name == "行业日报",
+                )
+            )
+        ).scalars().first()
+        if sub is None:
+            print("[industry→公司群] 无行业日报订阅，跳过")
+            return {"status": "skip", "reason": "no industry sub"}
+        if not settings.feishu_webhook_url_company:
+            print("[industry→公司群] 未配置公司群 webhook，跳过")
+            return {"status": "skip", "reason": "no company webhook"}
+
+        tz = ZoneInfo(sub.tz or settings.tz_default)
+        today = datetime.now(tz).date()
+        rows = (
+            await session.execute(
+                select(Digest)
+                .where(Digest.subscription_id == sub.id, Digest.status == "ready")
+                .order_by(Digest.run_at.desc())
+                .limit(5)
+            )
+        ).scalars().all()
+        digest = next(
+            (d for d in rows if d.run_at and d.run_at.astimezone(tz).date() == today),
+            None,
+        )
+        if digest is None:
+            print("[industry→公司群] 今天还没有 ready 的行业日报，跳过")
+            return {"status": "skip", "reason": "no today digest"}
+
+        already = (
+            await session.execute(
+                select(DeliveryLog.id)
+                .where(
+                    DeliveryLog.digest_id == digest.id,
+                    DeliveryLog.channel == channel,
+                    DeliveryLog.status == "ok",
+                )
+                .limit(1)
+            )
+        ).first()
+        if already is not None and not dry_run:
+            print("[industry→公司群] 今天已推过，幂等跳过")
+            return {"status": "skip", "reason": "already sent"}
+
+        view = await build_view(session, digest)
+        if dry_run:
+            print(f"[industry→公司群] dry-run: digest#{digest.id} 视图构建成功")
+            return {"status": "dry", "digest": digest.id, "view": view}
+
+        bot = FeishuBot(
+            settings.feishu_webhook_url_company, settings.feishu_webhook_secret_company
+        )
+        result = await bot.send(view)
+        session.add(
+            DeliveryLog(
+                digest_id=digest.id,
+                channel=channel,
+                status=result.get("status", "ok"),
+                response={"parts": result.get("parts"), "source": "industry-daily"},
+            )
+        )
+        await session.commit()
+        print(f"[industry→公司群] digest#{digest.id} 已推送")
+        return {"status": "ok", "digest": digest.id}
+
+
 async def biweekly_review_job() -> None:
     """每月 1 号、15 号：重生成学术+行业 skill，并把综述推到个人群 + 公司群。"""
     try:
@@ -151,6 +232,39 @@ async def watchdog_job() -> None:
                 print(f"[watchdog] {label} 补救失败: {e}")
                 failed.append(label)
 
+    # 3) 行业日报 → 公司群（工作日 07:45）
+    if settings.feishu_webhook_url_company:
+        async with SessionLocal() as session:
+            ind_sub = (
+                await session.execute(
+                    select(Subscription).where(
+                        Subscription.feed_type == "industry",
+                        Subscription.name == "行业日报",
+                    )
+                )
+            ).scalars().first()
+        if ind_sub is not None:
+            ind_tz = ZoneInfo(ind_sub.tz or settings.tz_default)
+            if selfheal.cron_fired_today("45 7 * * 1-5", ind_tz, datetime.now(ind_tz)):
+                async with SessionLocal() as session:
+                    d = await selfheal.todays_digest(session, ind_sub.id, ind_tz)
+                    pushed = d is not None and await selfheal.delivered_ok(
+                        session, d.id, "feishu_company_industry"
+                    )
+                if d is not None and not pushed:
+                    label = "行业日报(公司群)"
+                    try:
+                        await daily_industry_company_job()
+                        async with SessionLocal() as session:
+                            d2 = await selfheal.todays_digest(session, ind_sub.id, ind_tz)
+                            ok = d2 is not None and await selfheal.delivered_ok(
+                                session, d2.id, "feishu_company_industry"
+                            )
+                        (healed if ok else failed).append(label)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[watchdog] {label} 补救失败: {e}")
+                        failed.append(label)
+
     if healed:
         print(f"[watchdog] 已补推: {healed}")
     if failed and settings.selfheal_alert:
@@ -199,6 +313,18 @@ async def load_jobs(scheduler: AsyncIOScheduler) -> int:
             coalesce=True,
         )
         print(f"[scheduler] + 每日学术精选→公司群 cron='0 8 * * *' tz={settings.tz_default}")
+        n_jobs += 1
+
+        # 行业日报 → 公司群（工作日 07:45，行业日报 07:30 生成后补推完整版）
+        scheduler.add_job(
+            daily_industry_company_job,
+            trigger=CronTrigger(day_of_week="mon-fri", hour=7, minute=45, timezone=tz),
+            id="daily-industry-company",
+            replace_existing=True,
+            misfire_grace_time=3600,
+            coalesce=True,
+        )
+        print(f"[scheduler] + 行业日报→公司群 cron='45 7 * * 1-5' tz={settings.tz_default}")
         n_jobs += 1
 
     # 每月 1 号、15 号 09:00 重生成 skill + 半月综述推两群

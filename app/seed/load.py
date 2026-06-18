@@ -43,6 +43,16 @@ SUBSCRIPTIONS = [
         "max_classic": 2,
         "sources_file": "sources_academic.yaml",
     },
+    {
+        "name": "行业周报",
+        "feed_type": "industry",
+        "profile_name": "超薄 SiN 膜 / 微纳芯片平台",  # 复用行业日报的画像与源
+        "schedule_cron": "5 20 * * 0",  # 每周日 20:05（错开学术周报）→ 个人群
+        "max_deep": 5,
+        "max_brief": 12,
+        "max_classic": 0,
+        "sources_file": "sources_industry.yaml",
+    },
 ]
 
 
