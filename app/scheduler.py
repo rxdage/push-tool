@@ -287,7 +287,7 @@ async def load_jobs(scheduler: AsyncIOScheduler) -> int:
 
     for sub in subs:
         tz = ZoneInfo(sub.tz or settings.tz_default)
-        trigger = CronTrigger.from_crontab(sub.schedule_cron, timezone=tz)
+        trigger = selfheal.cron_trigger(sub.schedule_cron, tz)
         scheduler.add_job(
             run_subscription_job,
             trigger=trigger,

@@ -26,13 +26,46 @@ HEAL_GRACE = timedelta(minutes=15)
 # 进程内去重（重启重置，可接受）：当天已告警的 push key
 _alerted: set[str] = set()
 
+# cron 星期编号(0/7=周日, 1=周一…6=周六) → apscheduler 星期名
+_CRON_DOW = {
+    "0": "sun", "1": "mon", "2": "tue", "3": "wed",
+    "4": "thu", "5": "fri", "6": "sat", "7": "sun",
+}
+
+
+def _dow_cron_to_aps(field: str) -> str:
+    """把 cron 的星期字段翻成 apscheduler 能正确理解的星期名。"""
+    if field == "*":
+        return "*"
+    out: list[str] = []
+    for tok in field.split(","):
+        if "-" in tok:
+            a, b = tok.split("-")
+            out.append(f"{_CRON_DOW[a]}-{_CRON_DOW[b]}")
+        else:
+            out.append(_CRON_DOW[tok])
+    return ",".join(out)
+
+
+def cron_trigger(cron: str, tz: ZoneInfo) -> CronTrigger:
+    """按标准 cron 语义正确构造 CronTrigger。
+
+    apscheduler 的 from_crontab 不转换星期编号——cron 里 0=周日，而 apscheduler
+    原生 0=周一——直接套用会把所有带星期的任务整体偏一天。本函数显式翻译星期字段。
+    """
+    m, h, dom, mon, dow = cron.split()
+    return CronTrigger(
+        minute=m, hour=h, day=dom, month=mon,
+        day_of_week=_dow_cron_to_aps(dow), timezone=tz,
+    )
+
 
 def cron_fired_today(cron: str, tz: ZoneInfo, now: datetime) -> datetime | None:
     """若该 cron 今天（tz）有一个已过去 HEAL_GRACE 的触发点，返回它；否则 None。"""
     today = now.date()
     start = datetime.combine(today, dtime.min, tzinfo=tz)
     try:
-        trig = CronTrigger.from_crontab(cron, timezone=tz)
+        trig = cron_trigger(cron, tz)
     except Exception:  # noqa: BLE001 — cron 非法就当今天不该触发
         return None
     nxt = trig.get_next_fire_time(None, start)
