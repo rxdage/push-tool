@@ -109,11 +109,22 @@ def select_classics(
     fresh_high_citation: list[Item],
     max_classic: int,
     offset: int,
+    sent_counts: dict[int, int] | None = None,
 ) -> list[Item]:
-    """轮换选 max_classic 篇经典；人工种子不足时用 S2 高引用兜底。"""
+    """选 max_classic 篇经典；人工种子不足时用 S2 高引用兜底。
+
+    传入 sent_counts（每篇历史投递次数）时，优先没发过 / 发得少的（同次数按 id 稳定），
+    而非纯按 offset 轮换——配合调用方先剔除已达上限的，实现「最多两次、用尽不硬放」。
+    """
     if max_classic <= 0:
         return []
-    picked = rotate_classics(classic_items, max_classic, offset)
+    if sent_counts is not None:
+        ordered = sorted(
+            classic_items, key=lambda it: (sent_counts.get(it.id, 0), it.id)
+        )
+        picked = ordered[:max_classic]
+    else:
+        picked = rotate_classics(classic_items, max_classic, offset)
     if len(picked) < max_classic:
         picked_ids = {it.id for it in picked}
         ranked = sorted(

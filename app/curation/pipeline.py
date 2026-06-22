@@ -31,6 +31,19 @@ from app.models import Digest, DigestItem, InterestProfile, Item, Source, Subscr
 RELEVANCE_GATE = 0.4
 # 默认回看窗口（天），按 feed_type。
 LOOKBACK_DAYS = {"industry": 1, "academic": 7}
+# 周度订阅（每周固定一天触发）覆盖整周。
+WEEKLY_LOOKBACK_DAYS = 7
+# 单篇「经典回顾」最多投递次数；用尽后不硬性重复，宁可少放/留空。
+CLASSIC_MAX_SENDS = 2
+
+
+def _lookback_days(subscription: Subscription) -> int:
+    """回看窗口匹配触发节奏：每周固定一天触发的订阅（行业/学术周报）覆盖整周 7 天，
+    其余按 feed_type 默认（行业日报 1 天）。以 cron 星期字段是否为「单一某天」判定周度。"""
+    parts = (subscription.schedule_cron or "").split()
+    dow = parts[4] if len(parts) == 5 else "*"
+    is_weekly = dow != "*" and not any(c in dow for c in ("-", ",", "/"))
+    return WEEKLY_LOOKBACK_DAYS if is_weekly else LOOKBACK_DAYS.get(subscription.feed_type, 1)
 
 
 @dataclass
@@ -185,6 +198,22 @@ async def _drop_delivered_duplicates(
     return kept
 
 
+async def _classic_delivery_counts(
+    session: AsyncSession, subscription_id: int
+) -> dict[int, int]:
+    """本订阅历史里每篇「经典」item 已投递的次数（用于上限与优先级）。"""
+    rows = await session.execute(
+        select(DigestItem.item_id, func.count())
+        .join(Digest, DigestItem.digest_id == Digest.id)
+        .where(
+            Digest.subscription_id == subscription_id,
+            DigestItem.bucket == "classic",
+        )
+        .group_by(DigestItem.item_id)
+    )
+    return {iid: c for iid, c in rows.all()}
+
+
 async def _add_classics(
     session: AsyncSession,
     digest: Digest,
@@ -195,14 +224,23 @@ async def _add_classics(
     offset: int,
     used_ids: set[int],
 ) -> None:
-    """经典回顾桶：人工种子轮换 + S2 高引用兜底，summarize 后入库。"""
+    """经典回顾桶：人工种子优先没发过的 + S2 高引用兜底，summarize 后入库。
+
+    单篇经典最多投递 CLASSIC_MAX_SENDS 次；达上限的剔除，用尽则少放/留空（不硬性重复）。
+    """
     classic_items = await ensure_classic_items(session, subscription)
+    sent_counts = await _classic_delivery_counts(session, subscription.id)
+    eligible = [
+        it for it in classic_items if sent_counts.get(it.id, 0) < CLASSIC_MAX_SENDS
+    ]
     high_cit = [
         it
         for it in fresh_candidates
         if it.id not in used_ids and "high-citation" in (it.tags or [])
     ]
-    picked = select_classics(classic_items, high_cit, subscription.max_classic, offset)
+    picked = select_classics(
+        eligible, high_cit, subscription.max_classic, offset, sent_counts
+    )
     if not picked:
         return
 
@@ -237,7 +275,7 @@ async def run_pipeline(
     now = datetime.now(timezone.utc)
     period_end = period_end or now
     if period_start is None:
-        days = LOOKBACK_DAYS.get(subscription.feed_type, 1)
+        days = _lookback_days(subscription)
         period_start = period_end - timedelta(days=days)
 
     profile = await session.get(InterestProfile, subscription.interest_profile_id)
