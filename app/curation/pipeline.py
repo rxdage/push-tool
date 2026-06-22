@@ -117,24 +117,56 @@ def _bucket_deep_brief(
     return out
 
 
-async def _delivered_item_ids(session: AsyncSession, subscription_id: int) -> set[int]:
-    """历史已投递过的 item_id（用于跨期语义去重）。"""
-    rows = await session.execute(
+async def _delivered_item_ids(
+    session: AsyncSession, subscription: Subscription
+) -> tuple[set[int], set[int]]:
+    """历史已投递过的 item_id，分两组（用于跨期 / 跨订阅语义去重）：
+
+    - own：本订阅自己投递过的。
+    - sibling：共享同一 interest_profile 的「兄弟」订阅投递过的（如 行业日报↔行业周报）。
+      用来阻止同一篇文章在日报、周报里各发一次。
+    """
+    own_rows = await session.execute(
         select(DigestItem.item_id)
         .join(Digest, DigestItem.digest_id == Digest.id)
-        .where(Digest.subscription_id == subscription_id)
+        .where(Digest.subscription_id == subscription.id)
     )
-    return {iid for (iid,) in rows.all()}
+    own = {iid for (iid,) in own_rows.all()}
+
+    sib_sub_ids = (
+        await session.execute(
+            select(Subscription.id).where(
+                Subscription.interest_profile_id == subscription.interest_profile_id,
+                Subscription.id != subscription.id,
+            )
+        )
+    ).scalars().all()
+    sibling: set[int] = set()
+    if sib_sub_ids:
+        sib_rows = await session.execute(
+            select(DigestItem.item_id)
+            .join(Digest, DigestItem.digest_id == Digest.id)
+            .where(Digest.subscription_id.in_(sib_sub_ids))
+        )
+        sibling = {iid for (iid,) in sib_rows.all()}
+    return own, sibling
 
 
 async def _drop_delivered_duplicates(
     session: AsyncSession,
     shortlist: list[Item],
-    delivered_ids: set[int],
+    own_ids: set[int],
+    sibling_ids: set[int],
+    high_value_ids: set[int],
     threshold: float = 0.92,
 ) -> list[Item]:
-    """剔除与历史已投递条目语义近重复的候选（pgvector 余弦）。"""
-    if not delivered_ids:
+    """跨期 / 跨订阅语义去重（pgvector 余弦）：
+
+    - 与「本订阅」历史近重复 → 总是剔除：保持每期新鲜，并把单篇上限自然压到 2 次。
+    - 与「兄弟订阅」历史近重复（如日报已发）→ 仅当本篇为高价值（会进 deep 桶）才保留，
+      允许评分高 / 权威重要的文章跨订阅再发一次（最多 2 次）；其余剔除。
+    """
+    if not own_ids and not sibling_ids:
         return shortlist
     kept: list[Item] = []
     for it in shortlist:
@@ -144,8 +176,11 @@ async def _drop_delivered_duplicates(
         sims = await find_similar_in_db(
             session, it.embedding, exclude_item_id=it.id, cosine_threshold=threshold
         )
-        if any(sid in delivered_ids for sid, _ in sims):
-            continue
+        sim_ids = {sid for sid, _ in sims}
+        if sim_ids & own_ids:
+            continue  # 本订阅发过 → 不重复
+        if (sim_ids & sibling_ids) and it.id not in high_value_ids:
+            continue  # 兄弟订阅发过且非高价值 → 剔除
         kept.append(it)
     return kept
 
@@ -238,9 +273,13 @@ async def run_pipeline(
     top_n = max(10, budget * 3)
     shortlist = [s.item for s in scored[:top_n]]
 
-    # 跨期语义去重：剔除与历史已投递条目近重复的候选
-    delivered_ids = await _delivered_item_ids(session, subscription.id)
-    shortlist = await _drop_delivered_duplicates(session, shortlist, delivered_ids)
+    # 跨期 / 跨订阅语义去重：剔除已投递的近重复；高价值文章允许跨订阅再发一次（上限 2）
+    # 高价值 = 按预筛分数排在前 max_deep（即会进 deep“深度精读”桶）的候选
+    own_ids, sibling_ids = await _delivered_item_ids(session, subscription)
+    high_value_ids = {it.id for it in shortlist[: subscription.max_deep]}
+    shortlist = await _drop_delivered_duplicates(
+        session, shortlist, own_ids, sibling_ids, high_value_ids
+    )
 
     results = await _summarize(shortlist, profile, subscription.feed_type, cfg)
 
