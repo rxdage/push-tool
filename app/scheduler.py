@@ -214,9 +214,9 @@ async def watchdog_job() -> None:
             print(f"[watchdog] {label} 补救失败: {e}")
             failed.append(label)
 
-    # 2) 每日学术精选 → 公司群（每天 08:00）
+    # 2) 每日学术精选 → 公司群（每天 12:40）
     if settings.feishu_webhook_url_company and selfheal.cron_fired_today(
-        "0 8 * * *", tz, now
+        "40 12 * * *", tz, now
     ):
         async with SessionLocal() as session:
             done = await selfheal.company_pushed_ok_today(session, tz)
@@ -232,7 +232,7 @@ async def watchdog_job() -> None:
                 print(f"[watchdog] {label} 补救失败: {e}")
                 failed.append(label)
 
-    # 3) 行业日报 → 公司群（工作日 07:45）
+    # 3) 行业日报 → 公司群（工作日 12:40）
     if settings.feishu_webhook_url_company:
         async with SessionLocal() as session:
             ind_sub = (
@@ -245,7 +245,7 @@ async def watchdog_job() -> None:
             ).scalars().first()
         if ind_sub is not None:
             ind_tz = ZoneInfo(ind_sub.tz or settings.tz_default)
-            if selfheal.cron_fired_today("45 7 * * 1-5", ind_tz, datetime.now(ind_tz)):
+            if selfheal.cron_fired_today("40 12 * * 1-5", ind_tz, datetime.now(ind_tz)):
                 async with SessionLocal() as session:
                     d = await selfheal.todays_digest(session, ind_sub.id, ind_tz)
                     pushed = d is not None and await selfheal.delivered_ok(
@@ -306,25 +306,25 @@ async def load_jobs(scheduler: AsyncIOScheduler) -> int:
         tz = ZoneInfo(settings.tz_default)
         scheduler.add_job(
             daily_academic_company_job,
-            trigger=CronTrigger(hour=8, minute=0, timezone=tz),
+            trigger=CronTrigger(hour=12, minute=40, timezone=tz),
             id="daily-academic-company",
             replace_existing=True,
             misfire_grace_time=3600,
             coalesce=True,
         )
-        print(f"[scheduler] + 每日学术精选→公司群 cron='0 8 * * *' tz={settings.tz_default}")
+        print(f"[scheduler] + 每日学术精选→公司群 cron='40 12 * * *' tz={settings.tz_default}")
         n_jobs += 1
 
-        # 行业日报 → 公司群（工作日 07:45，行业日报 07:30 生成后补推完整版）
+        # 行业日报 → 公司群（工作日 12:40，行业日报 07:30 生成后当天中午推完整版）
         scheduler.add_job(
             daily_industry_company_job,
-            trigger=CronTrigger(day_of_week="mon-fri", hour=7, minute=45, timezone=tz),
+            trigger=CronTrigger(day_of_week="mon-fri", hour=12, minute=40, timezone=tz),
             id="daily-industry-company",
             replace_existing=True,
             misfire_grace_time=3600,
             coalesce=True,
         )
-        print(f"[scheduler] + 行业日报→公司群 cron='45 7 * * 1-5' tz={settings.tz_default}")
+        print(f"[scheduler] + 行业日报→公司群 cron='40 12 * * 1-5' tz={settings.tz_default}")
         n_jobs += 1
 
     # 每月 1 号、15 号 09:00 重生成 skill + 半月综述推两群
@@ -343,13 +343,13 @@ async def load_jobs(scheduler: AsyncIOScheduler) -> int:
     # 推送自愈 watchdog：推送时段每 15 分钟核对、补推、失败告警（不计入订阅数）
     scheduler.add_job(
         watchdog_job,
-        trigger=CronTrigger(minute="*/15", hour="7-11,20-22", timezone=tz),
+        trigger=CronTrigger(minute="*/15", hour="7-14,20-22", timezone=tz),
         id="selfheal-watchdog",
         replace_existing=True,
         misfire_grace_time=600,
         coalesce=True,
     )
-    print("[scheduler] + 推送自愈 watchdog cron='*/15 7-11,20-22 * * *'")
+    print("[scheduler] + 推送自愈 watchdog cron='*/15 7-14,20-22 * * *'")
 
     return n_jobs
 
