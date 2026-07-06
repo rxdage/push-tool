@@ -6,7 +6,7 @@
   config:
     name: 麦姆斯咨询
     url: https://www.memsconsulting.com/
-    keywords: [膜, 氮化硅, 电镜, 透射电镜, 纳米孔, 微纳, 晶圆, 刻蚀, 光刻, MEMS, SiN, TEM]
+    keywords: [膜, 薄膜, 氮化硅, SiN, 电镜, 透射电镜, TEM, 冷冻电镜, cryo, 纳米孔, 测序, 微纳, 晶圆, 刻蚀, 光刻, 沉积, LPCVD, PECVD, ALD, 键合, 代工, MEMS, 传感, 微流控, X射线, 探测器, 半导体, 材料, 设备, 封装, 光子]
     respect_robots: true
     rate_limit_s: 5
 # 半导体行业观察：overseas 节点连接超时（geo 受限），停用待 Phase-2 大陆分区
@@ -25,7 +25,7 @@
   config:
     name: 集微网 (JW Insights)
     url: https://www.laoyaoba.com/
-    keywords: [膜, 氮化硅, 电镜, 纳米孔, 微纳, 晶圆, 刻蚀, MEMS, SiN, TEM]
+    keywords: [膜, 薄膜, 氮化硅, SiN, 电镜, 透射电镜, TEM, 冷冻电镜, cryo, 纳米孔, 测序, 微纳, 晶圆, 刻蚀, 光刻, 沉积, LPCVD, PECVD, ALD, 键合, 代工, MEMS, 传感, 微流控, X射线, 探测器, 半导体, 材料, 设备, 封装, 光子]
     respect_robots: true
     rate_limit_s: 5
 - kind: rss
@@ -60,7 +60,7 @@
   config:
     name: 科技部 通知公告
     url: https://www.most.gov.cn/xxgk/xinxifenlei/fdzdgknr/fgzc/
-    keywords: [膜, 电镜, 微纳, 国产替代, 纳米孔, 仪器]
+    keywords: [膜, 电镜, 微纳, 国产替代, 纳米孔, 仪器, 半导体, 测序, 传感, 材料, 设备, 光子]
     respect_robots: true
     rate_limit_s: 5
 # NSFC：旧 URL 404 + 站点证书链不全（overseas 校验失败），停用待 Phase-2 大陆分区/放宽校验
