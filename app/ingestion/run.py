@@ -37,12 +37,16 @@ def adapter_name(source: Source) -> str:
 
 async def run(subscription_id: int | None = None) -> None:
     async with SessionLocal() as session:
-        sub_q = select(Subscription).where(Subscription.active.is_(True))
+        sub_q = select(Subscription)
         if subscription_id is not None:
+            # 显式点名某订阅时不看 active：active 只表示"是否进自动巡检/调度"，
+            # 不代表禁止抓取。公司群那份(active=False)正是由调用方显式驱动的。
             sub_q = sub_q.where(Subscription.id == subscription_id)
+        else:
+            sub_q = sub_q.where(Subscription.active.is_(True))
         subs = (await session.execute(sub_q)).scalars().all()
         if not subs:
-            print("没有匹配的 active 订阅。")
+            print("没有匹配的订阅。")
             return
 
         for sub in subs:

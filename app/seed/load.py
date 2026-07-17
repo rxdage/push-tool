@@ -53,6 +53,21 @@ SUBSCRIPTIONS = [
         "max_classic": 0,
         "sources_file": "sources_industry.yaml",
     },
+    {
+        # 公司群专用：竞对窄口径，和个人群那份(宽口径,含上下游)分开生成。
+        # active=False 是关键——不注册 cron、也不会被 run_subscription_job 投到个人群
+        # （deliver_digest 只发个人群渠道）。由 scheduler.daily_industry_company_job
+        # 在工作日 12:40 直接 ingest+run_pipeline 生成，并只推公司群渠道。
+        "name": "行业日报(公司群)",
+        "feed_type": "industry",
+        "profile_name": "超薄 SiN 膜竞对 (公司群)",
+        "schedule_cron": "40 12 * * 1-5",  # 仅作记录与自愈判定，不由 cron 注册
+        "active": False,
+        "max_deep": 3,
+        "max_brief": 6,
+        "max_classic": 0,
+        "sources_file": "sources_industry.yaml",
+    },
 ]
 
 
@@ -126,7 +141,7 @@ async def _seed_subscriptions(
                 max_brief=cfg["max_brief"],
                 max_classic=cfg["max_classic"],
                 delivery_channel_ids=[],
-                active=True,
+                active=bool(cfg.get("active", True)),
             )
             session.add(sub)
             await session.flush()
