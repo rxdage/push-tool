@@ -63,8 +63,9 @@ SUBSCRIPTIONS = [
         "profile_name": "超薄 SiN 膜竞对 (公司群)",
         "schedule_cron": "40 12 * * 1-5",  # 仅作记录与自愈判定，不由 cron 注册
         "active": False,
-        "max_deep": 3,
-        "max_brief": 6,
+        # 窄口径但要给足量：3+6=9 条实测被上限卡住（素材还有富余），放到 5+12
+        "max_deep": 5,
+        "max_brief": 12,
         "max_classic": 0,
         "sources_file": "sources_industry.yaml",
     },
