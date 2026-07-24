@@ -130,7 +130,8 @@ class Item(Base):
     source_id: Mapped[int] = mapped_column(
         ForeignKey("sources.id", ondelete="CASCADE"), index=True
     )
-    external_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # 部分源（如 Google News RSS）的 guid/id 是编码后的长跳转串，可能远超普通 URL 长度。
+    external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     title: Mapped[str] = mapped_column(Text, default="")
     abstract: Mapped[str | None] = mapped_column(Text, nullable=True)

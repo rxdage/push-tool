@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingestion.base import RawItem
@@ -62,12 +62,15 @@ async def store_items(
             tags=r.tags or [],
             raw_json=r.raw_json or {},
         )
-        # SAVEPOINT：唯一冲突只回滚这一行，不影响本批已插入的条目
+        # SAVEPOINT：单行出问题（唯一冲突 / 字段超长等数据类错误）只回滚这一行，
+        # 不拖累本批已插入的条目——之前只兜 IntegrityError，某源一条脏数据（如
+        # Google News 的超长 guid）曾经把整批（含其它正常源）一起回滚掉。
         try:
             async with session.begin_nested():
                 session.add(item)
                 await session.flush()
-        except IntegrityError:
+        except (IntegrityError, DataError) as e:
+            print(f"    ! source#{source.id} 单条入库失败（跳过）: {e.__class__.__name__}")
             skipped += 1
             continue
         if r.url:
