@@ -147,8 +147,22 @@ async def daily_industry_company_job(dry_run: bool = False) -> dict | None:
         digest = await session.get(Digest, digest_id)
         view = await build_view(session, digest)
         if dry_run:
-            print(f"[industry→公司群] dry-run: digest#{digest_id} 视图构建成功")
+            print(f"[industry→公司群] dry-run: digest#{digest_id} 视图构建成功 ({view.total} 条)")
             return {"status": "dry", "digest": digest_id, "view": view}
+
+        if view.total == 0:
+            # 同 deliver_digest：0 条命中不发空卡片，但记 ok 日志防止 watchdog 反复重跑。
+            print("[industry→公司群] 本期 0 条命中，跳过投递（仅记录）。")
+            session.add(
+                DeliveryLog(
+                    digest_id=digest_id,
+                    channel=channel,
+                    status="ok",
+                    response={"skipped": "empty digest, no push"},
+                )
+            )
+            await session.commit()
+            return {"status": "skip", "reason": "empty digest, no push"}
 
         bot = FeishuBot(
             settings.feishu_webhook_url_company, settings.feishu_webhook_secret_company

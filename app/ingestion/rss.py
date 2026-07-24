@@ -13,16 +13,42 @@ import feedparser
 
 from app.ingestion.base import RawItem, SourceAdapter, struct_time_to_dt
 
+# feedparser 走裸 urllib，默认 UA 容易被 CDN/反爬当机器人限速或拖住；
+# 带个正常浏览器 UA，和 html 适配器统一。
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) push-tool/0.1 (personal digest bot)"
+
 
 class RssAdapter(SourceAdapter):
     kind = "rss"
+
+    async def _parse_with_retry(self, url: str, attempts: int = 3):
+        """feed 抓取对网络抖动重试（指数退避），和 html 适配器保持一致的韧性。
+
+        feedparser 网络失败时通常不抛异常而是把 bozo_exception 挂在结果上，
+        entries 为空——这里两种情况（抛异常 / bozo 但 0 条）都重试。
+        """
+        last_exc: Exception | None = None
+        for i in range(attempts):
+            try:
+                parsed = await asyncio.to_thread(
+                    feedparser.parse, url, agent=USER_AGENT
+                )
+                if parsed.entries or not parsed.bozo:
+                    return parsed
+                last_exc = parsed.get("bozo_exception") or RuntimeError(
+                    "feedparser: 0 条且 bozo=1"
+                )
+            except Exception as e:  # noqa: BLE001
+                last_exc = e
+            if i < attempts - 1:
+                await asyncio.sleep(2**i)  # 1s, 2s
+        raise last_exc  # type: ignore[misc]
 
     async def fetch(self) -> list[RawItem]:
         url = self.config.get("url")
         if not url:
             raise ValueError(f"rss source {self.name!r} 缺少 config.url")
-        # feedparser 是同步的，丢线程池
-        parsed = await asyncio.to_thread(feedparser.parse, url)
+        parsed = await self._parse_with_retry(url)
         max_results = int(self.config.get("max_results", 60))
 
         items: list[RawItem] = []

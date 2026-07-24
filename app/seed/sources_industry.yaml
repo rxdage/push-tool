@@ -53,6 +53,13 @@
   config:
     name: SemiWiki
     url: https://semiwiki.com/feed/
+# Google News 关键词搜索源：实测比公司官网/泛半导体博客更新更频繁、且精准命中本业
+# 关键词（不需要再靠站内关键词过滤，query 本身已限定话题）。
+- kind: rss
+  weight: 1.1
+  config:
+    name: Google News (SiN膜/TEM/纳米孔关键词)
+    url: "https://news.google.com/rss/search?q=%22silicon+nitride+membrane%22+OR+%22TEM+grid%22+OR+%22nanopore+fabrication%22+OR+%22cryo-EM+grid%22&hl=en-US&gl=US&ceid=US:en"
 
 # 政策（scrape）。科技部实测可抓到（命中仪器开放共享通知）。
 - kind: html

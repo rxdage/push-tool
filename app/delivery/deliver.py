@@ -36,6 +36,22 @@ async def deliver_digest(
         print("  ! 未配置任何投递渠道（FEISHU_WEBHOOK_URL 为空），跳过投递。")
         return logs
 
+    if view.total == 0:
+        # 本期没有命中条目：不发"空卡片"骚扰群里，但仍记一条 ok 日志——
+        # 否则自愈 watchdog 会一直判定"今天没推成功"，每 15 分钟重跑一次。
+        print("  · 本期 0 条命中，跳过投递（仅记录）。")
+        for ch in channels:
+            log = DeliveryLog(
+                digest_id=digest.id,
+                channel=ch.kind,
+                status="ok",
+                response={"skipped": "empty digest, no push"},
+            )
+            session.add(log)
+            logs.append(log)
+        await session.flush()
+        return logs
+
     for ch in channels:
         try:
             result = await ch.send(view)
