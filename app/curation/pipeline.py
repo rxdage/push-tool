@@ -36,6 +36,42 @@ WEEKLY_LOOKBACK_DAYS = 7
 # 单篇「经典回顾」最多投递次数；用尽后不硬性重复，宁可少放/留空。
 CLASSIC_MAX_SENDS = 2
 
+# 学术期刊/预印本/文献仓储的域名与"出版方"名。行业类订阅要的是竞对动向、供应商产品、
+# 产业政策，不是论文——论文有学术周报专门在推，混进来会让行业日报读起来像学术日报。
+#
+# 为什么在这里再拦一道（源头 query 已经排除过）：
+#   1. 已入库的老条目不受源配置影响，仍会在回看窗口内被选中；
+#   2. Google News 只认前约 10 个 -site:，源头挡不全；
+#   3. 以后新增任何源，这道闸门都自动生效，不必逐个源去配。
+_ACADEMIC_DOMAINS = (
+    "nature.com", "sciencedirect.com", "wiley.com", "acs.org", "science.org",
+    "springer.com", "link.springer.com", "mdpi.com", "iopscience.iop.org",
+    "pnas.org", "frontiersin.org", "tandfonline.com", "rsc.org",
+    "biorxiv.org", "medrxiv.org", "arxiv.org", "ncbi.nlm.nih.gov",
+    "researchgate.net", "academia.edu", "semanticscholar.org", "osti.gov",
+)
+# Google News 的链接是编码跳转串，域名看不出来，只能认标题尾部的 " - 出版方"。
+_ACADEMIC_PUBLISHERS = (
+    "nature", "acs publications", "sciencedirect", "wiley", "springer",
+    "national institutes of health", "researchgate", "pubmed", "biorxiv",
+    "medrxiv", "arxiv", "mdpi", "frontiers", "iopscience", "pnas",
+    "taylor & francis", "semantic scholar", "academia.edu",
+    "research online", "research portal", "repository",
+)
+
+
+def is_academic_source_item(item: Item) -> bool:
+    """判断一条 item 是否来自学术期刊/预印本/文献仓储（用于行业类订阅过滤）。"""
+    url = (item.url or "").lower()
+    if any(d in url for d in _ACADEMIC_DOMAINS):
+        return True
+    title = (item.title or "").strip()
+    if " - " in title:
+        publisher = title.rsplit(" - ", 1)[-1].strip().lower()
+        if any(p in publisher for p in _ACADEMIC_PUBLISHERS):
+            return True
+    return False
+
 
 def _lookback_days(subscription: Subscription) -> int:
     """回看窗口匹配触发节奏：每周固定一天触发的订阅（行业/学术周报）覆盖整周 7 天，
@@ -296,6 +332,12 @@ async def run_pipeline(
     await session.flush()
 
     candidates = await _load_candidates(session, subscription, period_start)
+    if subscription.feed_type == "industry":
+        # 行业类订阅剔除论文类来源：这类内容归学术周报，混进来会让行业日报读起来像学术日报。
+        before = len(candidates)
+        candidates = [it for it in candidates if not is_academic_source_item(it)]
+        if before != len(candidates):
+            print(f"  · 行业过滤：剔除论文类来源 {before - len(candidates)} 条，剩 {len(candidates)}")
     if not candidates:
         digest.status = "empty"
         await session.flush()
