@@ -55,11 +55,15 @@
     url: https://semiwiki.com/feed/
 # Google News 关键词搜索源：实测比公司官网/泛半导体博客更新更频繁、且精准命中本业
 # 关键词（不需要再靠站内关键词过滤，query 本身已限定话题）。
+# 排除主流学术期刊/预印本域名——不排除的话结果几乎全是 Nature/Small 论文标题，
+# 行业日报会读起来像学术周报的翻版；排除后才是供应商产品页/行业动态那类真正的"行业"内容。
+# max_results 限量：避免这一个源的候选量（常 60-100 条）把候选池灌满、挤掉其它十几个源。
 - kind: rss
   weight: 1.1
   config:
     name: Google News (SiN膜/TEM/纳米孔关键词)
-    url: "https://news.google.com/rss/search?q=%22silicon+nitride+membrane%22+OR+%22TEM+grid%22+OR+%22nanopore+fabrication%22+OR+%22cryo-EM+grid%22&hl=en-US&gl=US&ceid=US:en"
+    url: "https://news.google.com/rss/search?q=%22silicon+nitride+membrane%22+OR+%22TEM+grid%22+OR+%22nanopore+fabrication%22+OR+%22cryo-EM+grid%22+-site:nature.com+-site:cell.com+-site:sciencedirect.com+-site:onlinelibrary.wiley.com+-site:pubs.acs.org+-site:science.org+-site:springer.com+-site:mdpi.com+-site:iopscience.iop.org+-site:pnas.org+-site:frontiersin.org+-site:tandfonline.com+-site:rsc.org+-site:biorxiv.org+-site:arxiv.org+-site:pubmed.ncbi.nlm.nih.gov&hl=en-US&gl=US&ceid=US:en"
+    max_results: 20
 
 # 政策（scrape）。科技部实测可抓到（命中仪器开放共享通知）。
 - kind: html
