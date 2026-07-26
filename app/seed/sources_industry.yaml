@@ -120,8 +120,13 @@
 - kind: rss
   weight: 1.0
   config: {name: DENSsolutions, url: https://denssolutions.com/feed/}
+# ⚠️ Moxtek 已停用（2026-07-26 实测）：moxtek.com 域名疑似过期后被抢注，现在整站所有
+# 路径都返回土耳其博彩站内容（标题 "Kingroyal giriş | Gece Boyu Canlı Casino"，
+# 站内还有指向 tr.kingrooyale.icu 的 hreflang）。当时 feed 恰好因 XML 格式非法解析失败，
+# 才没把赌场内容抓进库。若日后确认 Moxtek 启用了新域名/新 feed，再改回 active: true。
 - kind: rss
   weight: 0.9
+  active: false
   config: {name: Moxtek, url: https://moxtek.com/feed/}
 # 无 RSS 的竞品（html 抓新闻/新品页 + 关键词过滤）
 - kind: html

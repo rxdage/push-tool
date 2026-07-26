@@ -73,6 +73,44 @@ def is_academic_source_item(item: Item) -> bool:
     return False
 
 
+# 低信息量来源：社交/图片/3D 模型/问答站。这类即便命中关键词也不构成产业情报。
+_LOW_VALUE_DOMAINS = (
+    "instagram.com", "pinterest.", "facebook.com", "tiktok.com",
+    "youtube.com", "youtu.be", "printables.com", "thingiverse.com",
+    "x.com/", "twitter.com",
+)
+_LOW_VALUE_PUBLISHERS = (
+    "instagram", "pinterest", "facebook", "tiktok", "youtube",
+    "printables.com", "thingiverse",
+)
+
+
+def is_low_value_item(item: Item) -> bool:
+    """低信息量条目：社交/3D 模型站，或"标题即站名"的纯目录首页。
+
+    后者形如 "Molecular Dimensions - Molecular Dimensions"、"Tem grid - Sigma-Aldrich"，
+    正文部分与出版方几乎重复或只有一个泛泛品类词——点进去是产品目录首页，没有具体动向，
+    占着名额却提供不了情报价值。
+    """
+    url = (item.url or "").lower()
+    if any(d in url for d in _LOW_VALUE_DOMAINS):
+        return True
+    title = (item.title or "").strip()
+    if " - " not in title:
+        return False
+    head, publisher = title.rsplit(" - ", 1)
+    head, publisher = head.strip(), publisher.strip()
+    if any(p in publisher.lower() for p in _LOW_VALUE_PUBLISHERS):
+        return True
+    # 标题主体与站名相同 → 目录首页
+    if head.lower() == publisher.lower():
+        return True
+    # 主体过短且无具体信息（无数字规格、无型号）→ 视为泛目录页，如 "Tem grid"
+    if len(head) <= 12 and not any(ch.isdigit() for ch in head):
+        return True
+    return False
+
+
 def _lookback_days(subscription: Subscription) -> int:
     """回看窗口匹配触发节奏：每周固定一天触发的订阅（行业/学术周报）覆盖整周 7 天，
     其余按 feed_type 默认（行业日报 1 天）。以 cron 星期字段是否为「单一某天」判定周度。"""
@@ -333,11 +371,16 @@ async def run_pipeline(
 
     candidates = await _load_candidates(session, subscription, period_start)
     if subscription.feed_type == "industry":
-        # 行业类订阅剔除论文类来源：这类内容归学术周报，混进来会让行业日报读起来像学术日报。
+        # 行业类订阅剔除论文类来源（归学术周报）与低信息量来源（社交/纯目录首页）。
         before = len(candidates)
         candidates = [it for it in candidates if not is_academic_source_item(it)]
+        after_academic = len(candidates)
+        candidates = [it for it in candidates if not is_low_value_item(it)]
         if before != len(candidates):
-            print(f"  · 行业过滤：剔除论文类来源 {before - len(candidates)} 条，剩 {len(candidates)}")
+            print(
+                f"  · 行业过滤：论文 -{before - after_academic} 条，"
+                f"低信息量 -{after_academic - len(candidates)} 条，剩 {len(candidates)}"
+            )
     if not candidates:
         digest.status = "empty"
         await session.flush()
