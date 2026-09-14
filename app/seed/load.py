@@ -1,4 +1,4 @@
-"""幂等 seed：建 1 个 user、两个 InterestProfile、两个 Subscription + 各自 sources。
+"""幂等 seed：建 1 个 user、若干 InterestProfile、若干 Subscription + 各自 sources。
 
 用法：
     python -m app.seed.load
@@ -22,48 +22,42 @@ from app.models import InterestProfile, Source, Subscription, User
 SEED_DIR = Path(__file__).parent
 
 # 订阅级配置（第 5 节）。profile_name 对应 profiles.yaml 里的 name。
+#
+# 2026-08 起统一口径：三个订阅全部投公司群（deliver_digest 只发公司群渠道）。
+# 行业类一律走「竞对窄口径」画像，公司群不看泛半导体上下游；原来公司群专用的
+# 「行业日报(公司群)」已合并进「行业日报」，不再单独生成。
+# 学术由周更改工作日日更——窄口径行业日报最近 11 期有 7 期 0 条，工作日靠学术打底。
 SUBSCRIPTIONS = [
     {
         "name": "行业日报",
         "feed_type": "industry",
-        "profile_name": "超薄 SiN 膜 / 微纳芯片平台",
-        "schedule_cron": "30 7 * * 1-5",  # 每工作日 07:30
-        "max_deep": 3,
-        "max_brief": 6,
-        "max_classic": 0,
-        "sources_file": "sources_industry.yaml",
-    },
-    {
-        "name": "学术周报",
-        "feed_type": "academic",
-        "profile_name": "固态纳米孔",
-        "schedule_cron": "0 20 * * 0",  # 每周日 20:00
-        "max_deep": 5,
-        "max_brief": 15,
-        "max_classic": 2,
-        "sources_file": "sources_academic.yaml",
-    },
-    {
-        "name": "行业周报",
-        "feed_type": "industry",
-        "profile_name": "超薄 SiN 膜 / 微纳芯片平台",  # 复用行业日报的画像与源
-        "schedule_cron": "5 20 * * 0",  # 每周日 20:05（错开学术周报）→ 个人群
+        "profile_name": "超薄 SiN 膜竞对 (公司群)",
+        "schedule_cron": "30 7 * * 1-5",  # 每工作日 07:30 → 公司群
+        # 窄口径但要给足量：3+6=9 条实测被上限卡住（素材还有富余），放到 5+12
         "max_deep": 5,
         "max_brief": 12,
         "max_classic": 0,
         "sources_file": "sources_industry.yaml",
     },
     {
-        # 公司群专用：竞对窄口径，和个人群那份(宽口径,含上下游)分开生成。
-        # active=False 是关键——不注册 cron、也不会被 run_subscription_job 投到个人群
-        # （deliver_digest 只发个人群渠道）。由 scheduler.daily_industry_company_job
-        # 在工作日 12:40 直接 ingest+run_pipeline 生成，并只推公司群渠道。
-        "name": "行业日报(公司群)",
+        # 日更：行业窄口径大多数工作日筛不出东西（竞对官网更新太稀），公司群工作日
+        # 靠这档打底。回看仍是 7 天滚动窗口，已发过的由跨期去重剔除。
+        "name": "学术日报",
+        "feed_type": "academic",
+        "profile_name": "固态纳米孔",
+        "schedule_cron": "35 7 * * 1-5",  # 每工作日 07:35（错开行业日报 07:30）→ 公司群
+        # 原来周更是 5+15+2；摊到 5 个工作日，每天 2+3+1
+        "max_deep": 2,
+        "max_brief": 3,
+        "max_classic": 1,
+        "sources_file": "sources_academic.yaml",
+    },
+    {
+        "name": "行业周报",
         "feed_type": "industry",
-        "profile_name": "超薄 SiN 膜竞对 (公司群)",
-        "schedule_cron": "40 12 * * 1-5",  # 仅作记录与自愈判定，不由 cron 注册
-        "active": False,
-        # 窄口径但要给足量：3+6=9 条实测被上限卡住（素材还有富余），放到 5+12
+        "profile_name": "超薄 SiN 膜竞对 (公司群)",  # 复用行业日报的画像与源
+        "schedule_cron": "5 20 * * 0",  # 每周日 20:05（错开学术周报）→ 公司群
+        # 本周日报没发过的漏网之鱼（pipeline 跨订阅去重保证不重复）
         "max_deep": 5,
         "max_brief": 12,
         "max_classic": 0,

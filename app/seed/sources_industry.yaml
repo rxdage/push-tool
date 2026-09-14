@@ -161,3 +161,39 @@
     keywords: [x-ray, detector, sdd, window, silicon]
     respect_robots: true
     rate_limit_s: 5
+
+# —— 2026-08-10 增补：窄口径下竞对官网更新太稀（实测一天 8 家全 0 条），
+# 靠定向 Google News 与新竞对官网补供给。以下每个都用 scripts/probe_sources*.py 实测过条数与标题质量；
+# 探测中被淘汰的：竞对公司名裸查（撞名严重，返回足球运动员 "Salif Simpore"）、
+# X-ray 窗定向（只有 2 条且跑偏成天文新闻）、Phys.org/AZoNano/AZoM（泛纳米，窄口径必被拦）、
+# 仪器信息网/分析测试百科/SPI/Agar/EMS/Micro-to-Nano/TEMwindows（feed 解析失败或不存在）。
+- kind: rss
+  weight: 1.2
+  config:
+    name: Silson (SiN 窗/膜竞对)
+    url: https://www.silson.com/feed/
+- kind: rss
+  weight: 1.1
+  config:
+    name: Google News (竞对公司 + 行业限定词)
+    url: https://news.google.com/rss/search?q=%28%22Norcada%22+OR+%22SiMPore%22+OR+%22Quantifoil%22+OR+%22Protochips%22+OR+%22DENSsolutions%22+OR+%22Ted+Pella%22%29+AND+%28TEM+OR+microscopy+OR+membrane+OR+nanopore+OR+%22silicon+nitride%22+OR+cryo-EM%29&hl=en-US&gl=US&ceid=US:en
+- kind: rss
+  weight: 1.2
+  config:
+    name: Google News (电镜国产替代/采购)
+    url: https://news.google.com/rss/search?q=%E9%80%8F%E5%B0%84%E7%94%B5%E9%95%9C+OR+%E7%94%B5%E9%95%9C+OR+%22%E5%86%B7%E5%86%BB%E7%94%B5%E9%95%9C%22+%E9%87%87%E8%B4%AD+OR+%E5%9B%BD%E4%BA%A7&hl=zh-CN&gl=CN&ceid=CN:zh-Hans
+- kind: rss
+  weight: 1.2
+  config:
+    name: Google News (电镜招投标/中标)
+    url: https://news.google.com/rss/search?q=%28%E9%80%8F%E5%B0%84%E7%94%B5%E9%95%9C+OR+%E6%89%AB%E6%8F%8F%E7%94%B5%E9%95%9C+OR+%E5%86%B7%E5%86%BB%E7%94%B5%E9%95%9C%29+AND+%28%E6%8B%9B%E6%A0%87+OR+%E9%87%87%E8%B4%AD+OR+%E4%B8%AD%E6%A0%87+OR+%E9%AA%8C%E6%94%B6%29&hl=zh-CN&gl=CN&ceid=CN:zh-Hans
+- kind: rss
+  weight: 1.1
+  config:
+    name: Google News (cryo-EM 载网/支持膜)
+    url: https://news.google.com/rss/search?q=%28%22cryo-EM+grid%22+OR+%22TEM+support+film%22+OR+%22holey+carbon%22+OR+%22graphene+grid%22%29&hl=en-US&gl=US&ceid=US:en
+- kind: rss
+  weight: 1.1
+  config:
+    name: Google News (液体池/原位 TEM)
+    url: https://news.google.com/rss/search?q=%28%22in+situ+TEM%22+OR+%22liquid+cell+TEM%22+OR+%22liquid-cell+electron+microscopy%22%29&hl=en-US&gl=US&ceid=US:en

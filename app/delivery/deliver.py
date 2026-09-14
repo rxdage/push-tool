@@ -1,23 +1,30 @@
 """投递编排：digest -> 各渠道 send -> 记 DeliveryLog。
 
-MVP 渠道走 env（FEISHU_WEBHOOK_URL）。Phase-2 改读 Channel 表即可。
+2026-08 起只推公司群（FEISHU_WEBHOOK_URL_COMPANY）：个人群不再收任何情报内容，
+个人群 webhook 只留给 selfheal 的"推送失败"运维告警。
+Phase-2 改读 Channel 表即可支持多群路由。
 """
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, settings as default_settings
-from app.delivery.base import DeliveryChannel
+from app.delivery.base import COMPANY_CHANNEL, DeliveryChannel
 from app.delivery.feishu_bot import FeishuBot
 from app.delivery.formatter import build_view
 from app.models import DeliveryLog, Digest
 
 
 def build_channels(settings: Settings) -> list[DeliveryChannel]:
+    """所有订阅的 digest 都投公司群，个人群不再投内容。"""
     channels: list[DeliveryChannel] = []
-    if settings.feishu_webhook_url:
+    if settings.feishu_webhook_url_company:
         channels.append(
-            FeishuBot(settings.feishu_webhook_url, settings.feishu_webhook_secret)
+            FeishuBot(
+                settings.feishu_webhook_url_company,
+                settings.feishu_webhook_secret_company,
+                kind=COMPANY_CHANNEL,
+            )
         )
     return channels
 
@@ -33,7 +40,7 @@ async def deliver_digest(
     logs: list[DeliveryLog] = []
 
     if not channels:
-        print("  ! 未配置任何投递渠道（FEISHU_WEBHOOK_URL 为空），跳过投递。")
+        print("  ! 未配置公司群 webhook（FEISHU_WEBHOOK_URL_COMPANY 为空），跳过投递。")
         return logs
 
     if view.total == 0:

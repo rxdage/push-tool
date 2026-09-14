@@ -110,12 +110,16 @@ class FeishuBot(DeliveryChannel):
         secret: str = "",
         timeout: float = 15.0,
         *,
+        kind: str | None = None,
         retry_attempts: int | None = None,
         retry_base_delay: float | None = None,
         inter_card_delay: float = 0.5,
     ):
         if not webhook_url:
             raise ValueError("FEISHU_WEBHOOK_URL 未配置")
+        # 同一个类发不同群：kind 决定 DeliveryLog.channel 记成哪个渠道
+        if kind:
+            self.kind = kind
         self.webhook_url = webhook_url
         self.secret = secret
         self.timeout = timeout

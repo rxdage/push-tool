@@ -14,11 +14,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.delivery.base import COMPANY_CHANNEL, PERSONAL_CHANNEL  # noqa: F401 — 转出给 scheduler
 from app.delivery.feishu_bot import FeishuBot
 from app.models import DeliveryLog, Digest
-
-PERSONAL_CHANNEL = "feishu_bot"
-COMPANY_CHANNEL = "feishu_company"
 
 # 到点后留出缓冲再判定"漏推"，避免和正在跑的真任务抢跑导致重复推送
 HEAL_GRACE = timedelta(minutes=15)
@@ -110,23 +108,6 @@ async def delivered_ok(
     return row is not None
 
 
-async def company_pushed_ok_today(session: AsyncSession, tz: ZoneInfo) -> bool:
-    """今天（tz）是否有成功的公司群投递记录。"""
-    today = datetime.now(tz).date()
-    rows = (
-        await session.execute(
-            select(DeliveryLog.sent_at)
-            .where(
-                DeliveryLog.channel == COMPANY_CHANNEL,
-                DeliveryLog.status == "ok",
-            )
-            .order_by(DeliveryLog.sent_at.desc())
-            .limit(20)
-        )
-    ).scalars().all()
-    return any(s and s.astimezone(tz).date() == today for s in rows)
-
-
 def should_alert(key: str) -> bool:
     """每个 (日期+push) 当天只告警一次。"""
     if key in _alerted:
@@ -136,7 +117,11 @@ def should_alert(key: str) -> bool:
 
 
 async def send_alert(settings: Settings, lines: list[str]) -> None:
-    """把多次补救仍失败的推送告警发到个人群（尽力而为，失败只打日志）。"""
+    """把多次补救仍失败的推送告警发到个人群（尽力而为，失败只打日志）。
+
+    情报内容已全部改推公司群，个人群 webhook 只剩这一条运维告警通道——
+    这样排查噪音不会打扰公司群。
+    """
     if not settings.feishu_webhook_url or not lines:
         return
     body = "以下推送多次重试仍失败，请人工检查（可让 Claude 介入排查）：\n\n" + "\n".join(

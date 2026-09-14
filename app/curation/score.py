@@ -56,7 +56,14 @@ async def score_items(
             scored = []
 
     if not scored:
+        if not have_emb:
+            n_missing = sum(1 for it in items if it.embedding is None)
+            print(f"  ! {n_missing}/{len(items)} 条缺嵌入，初筛整体退回关键词重叠")
         scored = [ScoredItem(it, _keyword_overlap(it, profile)) for it in items]
+        if all(s.score == 0 for s in scored):
+            # 关键词是长描述短语（如 "biological nanopore (MspA / aerolysin)"）时字面匹配不上，
+            # 全 0 分。sort 稳定，此时保持 _load_candidates 的 published_at DESC 顺序 = 最新优先。
+            print("  ! 关键词重叠全 0 分，初筛退化为「最新优先」")
 
     scored.sort(key=lambda s: s.score, reverse=True)
     return scored

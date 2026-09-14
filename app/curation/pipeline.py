@@ -29,12 +29,14 @@ from app.models import Digest, DigestItem, InterestProfile, Item, Source, Subscr
 
 # 相关性闸门：LLM 判定 relevance 低于此值不进 digest。
 RELEVANCE_GATE = 0.4
-# 默认回看窗口（天），按 feed_type。
+# 默认回看窗口（天），按 feed_type。学术即使日更也保持 7 天滚动窗口——arxiv/pubmed
+# 有的日子一篇新论文都没有，窗口太窄会漏；已发过的由跨期去重剔除，不会重复推。
 LOOKBACK_DAYS = {"industry": 1, "academic": 7}
 # 周度订阅（每周固定一天触发）覆盖整周。
 WEEKLY_LOOKBACK_DAYS = 7
 # 单篇「经典回顾」最多投递次数；用尽后不硬性重复，宁可少放/留空。
-CLASSIC_MAX_SENDS = 2
+# 2026-08 起所有推送汇到同一个群，"同一篇只推一次"——经典回顾也不再重复投第二次。
+CLASSIC_MAX_SENDS = 1
 
 # 学术期刊/预印本/文献仓储的域名与"出版方"名。行业类订阅要的是竞对动向、供应商产品、
 # 产业政策，不是论文——论文有学术周报专门在推，混进来会让行业日报读起来像学术日报。
@@ -206,68 +208,54 @@ def _bucket_deep_brief(
 
 async def _delivered_item_ids(
     session: AsyncSession, subscription: Subscription
-) -> tuple[set[int], set[int]]:
-    """历史已投递过的 item_id，分两组（用于跨期 / 跨订阅语义去重）：
+) -> set[int]:
+    """历史已投递过的 item_id —— 本用户「所有订阅」的并集。
 
-    - own：本订阅自己投递过的。
-    - sibling：共享同一 interest_profile 的「兄弟」订阅投递过的（如 行业日报↔行业周报）。
-      用来阻止同一篇文章在日报、周报里各发一次。
+    2026-08 起全部订阅都投同一个群（公司群），所以去重范围不能再只看共享 profile 的
+    兄弟订阅：行业日报 / 行业周报 / 学术周报里出现同一篇，对收件人就是重复推送。
+    取全量并集，"同一篇只推一次"。已停用（active=False）的历史订阅也算——它推过的
+    内容群里已经看过了。
     """
-    own_rows = await session.execute(
-        select(DigestItem.item_id)
-        .join(Digest, DigestItem.digest_id == Digest.id)
-        .where(Digest.subscription_id == subscription.id)
-    )
-    own = {iid for (iid,) in own_rows.all()}
-
-    sib_sub_ids = (
+    sub_ids = (
         await session.execute(
-            select(Subscription.id).where(
-                Subscription.interest_profile_id == subscription.interest_profile_id,
-                Subscription.id != subscription.id,
-            )
+            select(Subscription.id).where(Subscription.user_id == subscription.user_id)
         )
     ).scalars().all()
-    sibling: set[int] = set()
-    if sib_sub_ids:
-        sib_rows = await session.execute(
-            select(DigestItem.item_id)
-            .join(Digest, DigestItem.digest_id == Digest.id)
-            .where(Digest.subscription_id.in_(sib_sub_ids))
-        )
-        sibling = {iid for (iid,) in sib_rows.all()}
-    return own, sibling
+    rows = await session.execute(
+        select(DigestItem.item_id)
+        .join(Digest, DigestItem.digest_id == Digest.id)
+        .where(Digest.subscription_id.in_(sub_ids))
+    )
+    return {iid for (iid,) in rows.all()}
 
 
 async def _drop_delivered_duplicates(
     session: AsyncSession,
     shortlist: list[Item],
-    own_ids: set[int],
-    sibling_ids: set[int],
-    high_value_ids: set[int],
+    delivered_ids: set[int],
     threshold: float = 0.92,
 ) -> list[Item]:
-    """跨期 / 跨订阅语义去重（pgvector 余弦）：
+    """跨期 / 跨订阅语义去重（pgvector 余弦）：与任何一期历史投递近重复的一律剔除。
 
-    - 与「本订阅」历史近重复 → 总是剔除：保持每期新鲜，并把单篇上限自然压到 2 次。
-    - 与「兄弟订阅」历史近重复（如日报已发）→ 仅当本篇为高价值（会进 deep 桶）才保留，
-      允许评分高 / 权威重要的文章跨订阅再发一次（最多 2 次）；其余剔除。
+    以前高价值文章可以跨订阅再发一次（单篇上限 2）；现在所有订阅共用一个群，
+    再发一次就是重复推送，所以取消了这个例外。
     """
-    if not own_ids and not sibling_ids:
+    if not delivered_ids:
         return shortlist
     kept: list[Item] = []
     for it in shortlist:
+        # 先看这条 item 本身发过没有：回看窗口重叠时（行业日报 1 天 vs 行业周报 7 天）
+        # 同一条会被两个订阅都选中，而 find_similar_in_db 会把自己排除掉，光靠近邻查不到。
+        if it.id in delivered_ids:
+            continue
         if it.embedding is None:
             kept.append(it)
             continue
         sims = await find_similar_in_db(
             session, it.embedding, exclude_item_id=it.id, cosine_threshold=threshold
         )
-        sim_ids = {sid for sid, _ in sims}
-        if sim_ids & own_ids:
-            continue  # 本订阅发过 → 不重复
-        if (sim_ids & sibling_ids) and it.id not in high_value_ids:
-            continue  # 兄弟订阅发过且非高价值 → 剔除
+        if {sid for sid, _ in sims} & delivered_ids:
+            continue  # 任一订阅的任一期发过 → 不重复
         kept.append(it)
     return kept
 
@@ -391,18 +379,21 @@ async def run_pipeline(
     deduped = dedup_candidates(candidates).kept
     scored = await score_items(deduped, profile)
 
+    # 跨期 / 跨订阅去重：本用户任何订阅任何一期投递过的（含近重复）一律剔除，同一篇只推一次。
+    #
+    # 便宜的 id 命中必须在「截断 top-N 之前」做：日更订阅的回看窗口有好几天（学术 7 天），
+    # 按相关度排出来的前几十条大多是昨天、前天已经发过的，先不滤掉的话，今天真正的新论文
+    # 会被它们挤出候选，日更就退化成每天推 0 条。抓取按 url 幂等，同一篇通常是同一个 item
+    # 行，所以 id 命中就能拦掉绝大部分重复；换了来源/url 的同一篇留给下面的嵌入近邻兜底。
+    delivered_ids = await _delivered_item_ids(session, subscription)
+    fresh = [s.item for s in scored if s.item.id not in delivered_ids]
+
     # 取 top-N 交给 LLM 精筛（留 3x 余量）
     budget = (subscription.max_deep + subscription.max_brief + subscription.max_classic)
     top_n = max(10, budget * 3)
-    shortlist = [s.item for s in scored[:top_n]]
+    shortlist = fresh[:top_n]
 
-    # 跨期 / 跨订阅语义去重：剔除已投递的近重复；高价值文章允许跨订阅再发一次（上限 2）
-    # 高价值 = 按预筛分数排在前 max_deep（即会进 deep“深度精读”桶）的候选
-    own_ids, sibling_ids = await _delivered_item_ids(session, subscription)
-    high_value_ids = {it.id for it in shortlist[: subscription.max_deep]}
-    shortlist = await _drop_delivered_duplicates(
-        session, shortlist, own_ids, sibling_ids, high_value_ids
-    )
+    shortlist = await _drop_delivered_duplicates(session, shortlist, delivered_ids)
 
     results = await _summarize(shortlist, profile, subscription.feed_type, cfg)
 

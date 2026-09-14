@@ -1,7 +1,31 @@
 # push-tool
 
-个人信息推送工具：两个定时 digest（行业日报 / 学术周报），由 Claude 筛选成"精华"，
+信息推送工具：几个定时 digest（行业日报 / 学术周报 / 行业周报），由 Claude 筛选成"精华"，
 推送到**飞书** + 一个 **web dashboard**。
+
+## 推送口径（2026-08 起）
+
+情报内容**只推公司群**（`FEISHU_WEBHOOK_URL_COMPANY`）；个人群 webhook 只留给
+"推送多次重试仍失败"的运维告警。
+
+| 推送 | 时间（Asia/Shanghai） | 画像 |
+| --- | --- | --- |
+| 行业日报 | 工作日 07:30 | 竞对窄口径（竞对动向 + 本业，不含泛半导体上下游） |
+| 学术日报 | 工作日 07:35 | 固态纳米孔（7 天滚动窗口，已发过的靠跨期去重剔除） |
+| 行业周报 | 周日 20:05 | 竞对窄口径（本周日报的漏网之鱼） |
+| 半月综述 ×2 | 1、15 号 09:00 | 由 `skills/` 蒸馏正文生成 |
+
+窄口径行业日报大多数工作日筛不出东西（竞对官网更新稀疏），学术日报是工作日的兜底。
+学术原为周更，改日更的另一半原因是 ingest 跟着 cron 走——周更时整周只在周日抓一次源。
+
+改了源或画像后，用 `scripts/sync_seed_to_db.py` 同步到已有库（`seed.load` 只建不改）。
+排查"为什么没推"用 `scripts/diag_pipeline.py`（只读，看条目在哪一步被砍光）和
+`scripts/diag_summarize.py`（跑一遍 LLM 精筛预演，`digest_id` 传 0 = 预演下一期）。
+
+**同一篇只推一次**：`pipeline._drop_delivered_duplicates` 拿本用户**所有**订阅的历史
+投递做 pgvector 近重复比对，命中就剔除（不再有"高价值可跨订阅再发一次"的例外）。
+
+已有部署切到这套口径：`docker compose exec -T db psql -U push -d pushtool -f - < scripts/switch_to_company_only.sql`，然后 `docker compose restart scheduler`。
 
 > 设计与范围见 [`推送工具-ClaudeCode构建Spec.md`](推送工具-ClaudeCode构建Spec.md)。
 > 硬约束：**云中立 + 多租户就绪**——兴趣画像是 `InterestProfile` 表里的数据行，不写死在代码里。
@@ -84,4 +108,6 @@ uvicorn app.main:app --reload
 ## 你需要自备
 
 - `ANTHROPIC_API_KEY`
-- 飞书自定义机器人 `FEISHU_WEBHOOK_URL`（在飞书群里加"自定义机器人"获取）
+- 飞书自定义机器人 `FEISHU_WEBHOOK_URL_COMPANY`（在群里加"自定义机器人"获取）——
+  所有情报都推这个群，留空就完全不投递
+- 可选 `FEISHU_WEBHOOK_URL`：只用来收"推送失败"运维告警

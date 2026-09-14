@@ -1,10 +1,11 @@
-"""半月度领域综述 → 飞书（个人群 + 公司群）。
+"""半月度领域综述 → 飞书公司群。
 
-复用 distill 的蒸馏正文，包成卡片推两个群；推送本身 0 额外 token（只重生成 skill 那步花）。
+复用 distill 的蒸馏正文，包成卡片推公司群；推送本身 0 额外 token（只重生成 skill 那步花）。
+2026-08 起个人群不再收内容，这里也只发公司群。
 
 用法：
     python -m app.delivery.review --dry-run   # 只看会发什么，不发送
-    python -m app.delivery.review             # 真发到两个群
+    python -m app.delivery.review             # 真发到公司群
 """
 from __future__ import annotations
 
@@ -27,10 +28,8 @@ REVIEW_TARGETS = [
 
 
 def _groups(settings: Settings) -> list[tuple[str, str, str]]:
-    """返回 (群名, webhook, secret) —— 个人群 + 公司群（配了才算）。"""
+    """返回 (群名, webhook, secret) —— 只有公司群（配了才算）。"""
     out = []
-    if settings.feishu_webhook_url:
-        out.append(("个人群", settings.feishu_webhook_url, settings.feishu_webhook_secret))
     if settings.feishu_webhook_url_company:
         out.append(
             ("公司群", settings.feishu_webhook_url_company, settings.feishu_webhook_secret_company)

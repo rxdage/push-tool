@@ -3,6 +3,11 @@
 job = 抓取 → 筛选 pipeline → 投递。幂等（同一天同订阅不重复出 digest），记 run 状态。
 预留切队列（Arq/Celery/RQ）的接缝：把 run_subscription_job 入队即可。
 
+2026-08 起推送口径统一：所有订阅都只投公司群，时间表沿用原个人群那套
+（行业日报 工作日 07:30 / 学术周报 周日 20:00 / 行业周报 周日 20:05 /
+半月综述 1、15 号 09:00）。原来 12:40 的两个公司群专用任务（每日学术精选 5 条、
+竞对窄口径行业日报）已取消——内容与上面这几条重复，"同一篇只推一次"。
+
 standalone：python -m app.scheduler
 """
 from __future__ import annotations
@@ -19,15 +24,10 @@ from app.config import settings
 from app.curation.pipeline import run_pipeline
 from app.db import SessionLocal
 from app.delivery import selfheal
-from app.delivery.daily_excerpt import push_daily_academic
 from app.delivery.deliver import deliver_digest
 from app.delivery.review import push_review
 from app.ingestion.run import run as run_ingest
 from app.models import Digest, Subscription
-
-# 公司群专用的「竞对窄口径」行业日报订阅名（active=False，只由本模块的
-# daily_industry_company_job 驱动；个人群那份叫「行业日报」，口径更宽）。
-COMPANY_INDUSTRY_SUB = "行业日报(公司群)"
 
 
 async def _already_ran_today(session, sub: Subscription) -> bool:
@@ -71,118 +71,8 @@ async def run_subscription_job(sub_id: int, *, fetch: bool = True) -> None:
             print(f"[job] subscription#{sub_id} 投递完成")
 
 
-async def daily_academic_company_job() -> None:
-    """每天早 8 点：从最新学术周报里取 N 条推公司群（复用摘要，0 LLM）。"""
-    async with SessionLocal() as session:
-        res = await push_daily_academic(session, settings)
-        await session.commit()
-    print(f"[daily-academic→公司群] {res}")
-
-
-async def daily_industry_company_job(dry_run: bool = False) -> dict | None:
-    """工作日 12:40：生成「竞对窄口径」行业日报，只推公司群。幂等。
-
-    公司群要的是竞对动向 + 本业，和个人群那份（宽口径、含上下游产业）不同，因此它是
-    一个独立订阅 COMPANY_INDUSTRY_SUB：
-    - 该订阅 active=False，不会被 load_jobs 注册 cron，也不会走 run_subscription_job；
-      这很重要，因为 deliver_digest 只发个人群渠道，走那条路会把窄口径误投给个人群。
-    - 这里自己 ingest + run_pipeline 生成 digest，再只推 feishu_company_industry 渠道。
-    """
-    from app.delivery.feishu_bot import FeishuBot
-    from app.delivery.formatter import build_view
-    from app.models import DeliveryLog
-
-    channel = "feishu_company_industry"
-    if not settings.feishu_webhook_url_company:
-        print("[industry→公司群] 未配置公司群 webhook，跳过")
-        return {"status": "skip", "reason": "no company webhook"}
-
-    async with SessionLocal() as session:
-        sub = (
-            await session.execute(
-                select(Subscription).where(Subscription.name == COMPANY_INDUSTRY_SUB)
-            )
-        ).scalars().first()
-        if sub is None:
-            print(f"[industry→公司群] 无 {COMPANY_INDUSTRY_SUB!r} 订阅，跳过")
-            return {"status": "skip", "reason": "no company industry sub"}
-        sub_id = sub.id
-        tz = ZoneInfo(sub.tz or settings.tz_default)
-
-    # 1) 今天还没生成过 → 抓取 + 筛选（不调 deliver_digest，避免误投个人群）
-    async with SessionLocal() as session:
-        d = await selfheal.todays_digest(session, sub_id, tz)
-        digest_id = d.id if d is not None and d.status == "ready" else None
-    if digest_id is None:
-        try:
-            await run_ingest(sub_id)
-        except Exception as e:  # noqa: BLE001 — 抓取失败不阻断（用已有 item）
-            print(f"[industry→公司群] 抓取异常（继续）: {e}")
-        async with SessionLocal() as session:
-            sub = await session.get(Subscription, sub_id)
-            digest = await run_pipeline(session, sub)
-            await session.commit()
-            print(f"[industry→公司群] digest#{digest.id} status={digest.status}")
-            if digest.status != "ready":
-                return {"status": "skip", "reason": f"digest {digest.status}"}
-            digest_id = digest.id
-
-    # 2) 推公司群（幂等）
-    async with SessionLocal() as session:
-        already = (
-            await session.execute(
-                select(DeliveryLog.id)
-                .where(
-                    DeliveryLog.digest_id == digest_id,
-                    DeliveryLog.channel == channel,
-                    DeliveryLog.status == "ok",
-                )
-                .limit(1)
-            )
-        ).first()
-        if already is not None and not dry_run:
-            print("[industry→公司群] 今天已推过，幂等跳过")
-            return {"status": "skip", "reason": "already sent"}
-
-        digest = await session.get(Digest, digest_id)
-        view = await build_view(session, digest)
-        if dry_run:
-            print(f"[industry→公司群] dry-run: digest#{digest_id} 视图构建成功 ({view.total} 条)")
-            return {"status": "dry", "digest": digest_id, "view": view}
-
-        if view.total == 0:
-            # 同 deliver_digest：0 条命中不发空卡片，但记 ok 日志防止 watchdog 反复重跑。
-            print("[industry→公司群] 本期 0 条命中，跳过投递（仅记录）。")
-            session.add(
-                DeliveryLog(
-                    digest_id=digest_id,
-                    channel=channel,
-                    status="ok",
-                    response={"skipped": "empty digest, no push"},
-                )
-            )
-            await session.commit()
-            return {"status": "skip", "reason": "empty digest, no push"}
-
-        bot = FeishuBot(
-            settings.feishu_webhook_url_company, settings.feishu_webhook_secret_company
-        )
-        result = await bot.send(view)
-        session.add(
-            DeliveryLog(
-                digest_id=digest_id,
-                channel=channel,
-                status=result.get("status", "ok"),
-                response={"parts": result.get("parts"), "source": "industry-daily-company"},
-            )
-        )
-        await session.commit()
-        print(f"[industry→公司群] digest#{digest_id} 已推送")
-        return {"status": "ok", "digest": digest_id}
-
-
 async def biweekly_review_job() -> None:
-    """每月 1 号、15 号：重生成学术+行业 skill，并把综述推到个人群 + 公司群。"""
+    """每月 1 号、15 号：重生成学术+行业 skill，并把综述推到公司群。"""
     try:
         results = await push_review(settings)
         print(f"[半月综述] {results}")
@@ -207,7 +97,7 @@ async def watchdog_job() -> None:
             )
         ).scalars().all()
 
-    # 1) 各订阅（行业日报 / 学术周报）→ 个人群
+    # 各订阅（行业日报 / 学术周报 / 行业周报）→ 公司群
     for sub in subs:
         sub_tz = ZoneInfo(sub.tz or settings.tz_default)
         if selfheal.cron_fired_today(sub.schedule_cron, sub_tz, datetime.now(sub_tz)) is None:
@@ -215,12 +105,12 @@ async def watchdog_job() -> None:
         async with SessionLocal() as session:
             digest = await selfheal.todays_digest(session, sub.id, sub_tz)
             already = digest is not None and await selfheal.delivered_ok(
-                session, digest.id, selfheal.PERSONAL_CHANNEL
+                session, digest.id, selfheal.COMPANY_CHANNEL
             )
             digest_id = digest.id if digest else None
         if already:
             continue
-        label = f"{sub.name}(个人群)"
+        label = f"{sub.name}(公司群)"
         try:
             if digest_id is None:
                 await run_subscription_job(sub.id)  # 没生成 → 整套重跑（含投递）
@@ -232,64 +122,12 @@ async def watchdog_job() -> None:
             async with SessionLocal() as session:
                 d2 = await selfheal.todays_digest(session, sub.id, sub_tz)
                 ok = d2 is not None and await selfheal.delivered_ok(
-                    session, d2.id, selfheal.PERSONAL_CHANNEL
+                    session, d2.id, selfheal.COMPANY_CHANNEL
                 )
             (healed if ok else failed).append(label)
         except Exception as e:  # noqa: BLE001
             print(f"[watchdog] {label} 补救失败: {e}")
             failed.append(label)
-
-    # 2) 每日学术精选 → 公司群（每天 12:40）
-    if settings.feishu_webhook_url_company and selfheal.cron_fired_today(
-        "40 12 * * *", tz, now
-    ):
-        async with SessionLocal() as session:
-            done = await selfheal.company_pushed_ok_today(session, tz)
-        if not done:
-            label = "每日学术精选(公司群)"
-            try:
-                await daily_academic_company_job()
-                async with SessionLocal() as session:
-                    if await selfheal.company_pushed_ok_today(session, tz):
-                        healed.append(label)
-                    # daily_academic 可能因"本期已发完"返回 skip（非失败），不算漏推
-            except Exception as e:  # noqa: BLE001
-                print(f"[watchdog] {label} 补救失败: {e}")
-                failed.append(label)
-
-    # 3) 行业日报(竞对窄口径) → 公司群（工作日 12:40，独立订阅、自己生成）
-    if settings.feishu_webhook_url_company and selfheal.cron_fired_today(
-        "40 12 * * 1-5", tz, now
-    ):
-        async with SessionLocal() as session:
-            csub = (
-                await session.execute(
-                    select(Subscription).where(
-                        Subscription.name == COMPANY_INDUSTRY_SUB
-                    )
-                )
-            ).scalars().first()
-            pushed = False
-            if csub is not None:
-                d = await selfheal.todays_digest(session, csub.id, tz)
-                pushed = d is not None and await selfheal.delivered_ok(
-                    session, d.id, "feishu_company_industry"
-                )
-            csub_id = csub.id if csub is not None else None
-        # 没生成也算漏推：daily_industry_company_job 会自己 ingest+生成再推
-        if csub_id is not None and not pushed:
-            label = "行业日报(公司群)"
-            try:
-                await daily_industry_company_job()
-                async with SessionLocal() as session:
-                    d2 = await selfheal.todays_digest(session, csub_id, tz)
-                    ok = d2 is not None and await selfheal.delivered_ok(
-                        session, d2.id, "feishu_company_industry"
-                    )
-                (healed if ok else failed).append(label)
-            except Exception as e:  # noqa: BLE001
-                print(f"[watchdog] {label} 补救失败: {e}")
-                failed.append(label)
 
     if healed:
         print(f"[watchdog] 已补推: {healed}")
@@ -303,7 +141,7 @@ async def watchdog_job() -> None:
 
 
 async def load_jobs(scheduler: AsyncIOScheduler) -> int:
-    """读所有 active subscription 注册 cron job；另加每日学术精选→公司群任务。"""
+    """读所有 active subscription 注册 cron job（全部投公司群）+ 半月综述 + watchdog。"""
     async with SessionLocal() as session:
         subs = (
             await session.execute(
@@ -327,33 +165,10 @@ async def load_jobs(scheduler: AsyncIOScheduler) -> int:
 
     n_jobs = len(subs)
 
-    # 每日学术精选 → 公司群（仅在配了公司 webhook 时启用）
-    if settings.feishu_webhook_url_company:
-        tz = ZoneInfo(settings.tz_default)
-        scheduler.add_job(
-            daily_academic_company_job,
-            trigger=CronTrigger(hour=12, minute=40, timezone=tz),
-            id="daily-academic-company",
-            replace_existing=True,
-            misfire_grace_time=3600,
-            coalesce=True,
-        )
-        print(f"[scheduler] + 每日学术精选→公司群 cron='40 12 * * *' tz={settings.tz_default}")
-        n_jobs += 1
+    if not settings.feishu_webhook_url_company:
+        print("[scheduler] ! FEISHU_WEBHOOK_URL_COMPANY 为空——digest 会照常生成但不会投递。")
 
-        # 行业日报 → 公司群（工作日 12:40，行业日报 07:30 生成后当天中午推完整版）
-        scheduler.add_job(
-            daily_industry_company_job,
-            trigger=CronTrigger(day_of_week="mon-fri", hour=12, minute=40, timezone=tz),
-            id="daily-industry-company",
-            replace_existing=True,
-            misfire_grace_time=3600,
-            coalesce=True,
-        )
-        print(f"[scheduler] + 行业日报→公司群 cron='40 12 * * 1-5' tz={settings.tz_default}")
-        n_jobs += 1
-
-    # 每月 1 号、15 号 09:00 重生成 skill + 半月综述推两群
+    # 每月 1 号、15 号 09:00 重生成 skill + 半月综述推公司群
     tz = ZoneInfo(settings.tz_default)
     scheduler.add_job(
         biweekly_review_job,
@@ -363,7 +178,7 @@ async def load_jobs(scheduler: AsyncIOScheduler) -> int:
         misfire_grace_time=6 * 3600,
         coalesce=True,
     )
-    print(f"[scheduler] + 半月综述(skill+推两群) cron='0 9 1,15 * *' tz={settings.tz_default}")
+    print(f"[scheduler] + 半月综述(skill+推公司群) cron='0 9 1,15 * *' tz={settings.tz_default}")
     n_jobs += 1
 
     # 推送自愈 watchdog：推送时段每 15 分钟核对、补推、失败告警（不计入订阅数）
@@ -387,7 +202,7 @@ async def main() -> None:
         print("[scheduler] 没有 active 订阅，退出。")
         return
     scheduler.start()
-    print(f"[scheduler] 已启动，{n} 个订阅。Ctrl-C 退出。")
+    print(f"[scheduler] 已启动，{n} 个定时任务（含半月综述）。Ctrl-C 退出。")
     try:
         await asyncio.Event().wait()  # 阻塞
     except (KeyboardInterrupt, SystemExit):

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app.ingestion.arxiv import ArxivAdapter
 from app.ingestion.base import SourceAdapter
+from app.ingestion.crossref import CrossrefAdapter
 from app.ingestion.html_scrape import HtmlScrapeAdapter
 from app.ingestion.pubmed import PubmedAdapter
 from app.ingestion.rss import RssAdapter
@@ -14,6 +15,7 @@ ADAPTERS: dict[str, type[SourceAdapter]] = {
     PubmedAdapter.kind: PubmedAdapter,
     SemanticScholarAdapter.kind: SemanticScholarAdapter,
     HtmlScrapeAdapter.kind: HtmlScrapeAdapter,
+    CrossrefAdapter.kind: CrossrefAdapter,
 }
 
 
