@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import settings
 from app.curation.pipeline import run_pipeline
@@ -27,20 +27,34 @@ from app.delivery import selfheal
 from app.delivery.deliver import deliver_digest
 from app.delivery.review import push_review
 from app.ingestion.run import run as run_ingest
-from app.models import Digest, Subscription
+from app.models import Digest, DigestItem, Subscription
 
 
 async def _already_ran_today(session, sub: Subscription) -> bool:
-    """幂等：今天（按订阅 tz）是否已生成过该订阅的 digest。"""
+    """幂等：今天（按订阅 tz）是否已生成过该订阅的 digest。
+
+    failed 的那期（网络/VPN 挂了，一条内容都没有）不算跑过，留给 watchdog 重跑。
+    """
     tz = ZoneInfo(sub.tz or settings.tz_default)
     today = datetime.now(tz).date()
     rows = await session.execute(
-        select(Digest.run_at).where(Digest.subscription_id == sub.id)
+        select(Digest.run_at).where(
+            Digest.subscription_id == sub.id, Digest.status != "failed"
+        )
     )
     for (run_at,) in rows.all():
         if run_at and run_at.astimezone(tz).date() == today:
             return True
     return False
+
+
+async def _has_items(session, digest_id: int) -> bool:
+    n = (
+        await session.execute(
+            select(func.count(DigestItem.id)).where(DigestItem.digest_id == digest_id)
+        )
+    ).scalar_one()
+    return n > 0
 
 
 async def run_subscription_job(sub_id: int, *, fetch: bool = True) -> None:
@@ -62,22 +76,46 @@ async def run_subscription_job(sub_id: int, *, fetch: bool = True) -> None:
             return
 
         digest = await run_pipeline(session, sub)
+        if digest.status != "failed" and not await _has_items(session, digest.id):
+            # 0 条时确认一下网络：连不上 Claude API 说明是 VPN/代理挂了导致抓取、摘要全失败，
+            # 不是"今天没新内容"——记 failed，交给 watchdog 重跑和告警，不再静默跳过。
+            if not await selfheal.llm_reachable(settings):
+                print("  ! 本期 0 条且连不上 Claude API（多半是 VPN 节点挂了），记为 failed")
+                digest.status = "failed"
         await session.commit()
         print(f"[job] digest#{digest.id} status={digest.status}")
 
-        if digest.status == "ready":
-            await deliver_digest(session, digest, settings)
-            await session.commit()
-            print(f"[job] subscription#{sub_id} 投递完成")
+        if digest.status == "failed":
+            print(f"[job] subscription#{sub_id} 本期失败，不投递（watchdog 会重试并告警）")
+            return
+        # ready 和 empty 都走投递：0 条时 deliver_digest 只记一条 skipped 日志，
+        # watchdog 据此认定今天已处理，不会把"真没新内容"当成漏推去告警。
+        await deliver_digest(session, digest, settings)
+        await session.commit()
+        print(f"[job] subscription#{sub_id} 投递完成")
 
 
 async def biweekly_review_job() -> None:
-    """每月 1 号、15 号：重生成学术+行业 skill，并把综述推到公司群。"""
+    """每月 1 号、15 号：重生成学术+行业 skill，并把综述推到公司群。
+
+    不自动重试；失败（多半是连不上 Claude API）就告警到个人群，别让它悄悄漏掉。
+    """
     try:
         results = await push_review(settings)
         print(f"[半月综述] {results}")
+        problems = [
+            str(r)
+            for r in results
+            if not any(str(v).startswith("ok") for v in (r.get("sent") or {}).values())
+        ]
     except Exception as e:  # noqa: BLE001
         print(f"[半月综述] 失败: {e}")
+        problems = [f"出错：{e}"]
+    if problems and settings.selfheal_alert:
+        await selfheal.send_alert(
+            settings,
+            [f"半月综述没推出去（不会自动重试，可让 Claude 手动重发）：{p}" for p in problems],
+        )
 
 
 async def watchdog_job() -> None:
@@ -89,6 +127,7 @@ async def watchdog_job() -> None:
     now = datetime.now(tz)
     healed: list[str] = []
     failed: list[str] = []
+    reasons: dict[str, str] = {}
 
     async with SessionLocal() as session:
         subs = (
@@ -104,16 +143,17 @@ async def watchdog_job() -> None:
             continue  # 今天本来就不该推（或还没到补救时间）
         async with SessionLocal() as session:
             digest = await selfheal.todays_digest(session, sub.id, sub_tz)
-            already = digest is not None and await selfheal.delivered_ok(
+            delivered = digest is not None and await selfheal.delivered_ok(
                 session, digest.id, selfheal.COMPANY_CHANNEL
             )
+            action = selfheal.heal_action(digest, delivered)
             digest_id = digest.id if digest else None
-        if already:
+        if action is None:
             continue
         label = f"{sub.name}(公司群)"
         try:
-            if digest_id is None:
-                await run_subscription_job(sub.id)  # 没生成 → 整套重跑（含投递）
+            if action == "rerun":
+                await run_subscription_job(sub.id)  # 没生成 / 那期 failed → 整套重跑（含投递）
             else:
                 async with SessionLocal() as session:  # 生成了但没投成 → 重投
                     d = await session.get(Digest, digest_id)
@@ -124,18 +164,29 @@ async def watchdog_job() -> None:
                 ok = d2 is not None and await selfheal.delivered_ok(
                     session, d2.id, selfheal.COMPANY_CHANNEL
                 )
-            (healed if ok else failed).append(label)
+                d2_status = d2.status if d2 else None
+            if ok:
+                healed.append(label)
+            else:
+                failed.append(label)
+                reasons[label] = selfheal.failure_reason(d2_status)
         except Exception as e:  # noqa: BLE001
             print(f"[watchdog] {label} 补救失败: {e}")
             failed.append(label)
+            reasons[label] = f"补救时出错：{e}"
 
+    today = now.strftime("%Y-%m-%d")
     if healed:
         print(f"[watchdog] 已补推: {healed}")
-    if failed and settings.selfheal_alert:
-        today = now.strftime("%Y-%m-%d")
-        fresh = [f for f in failed if selfheal.should_alert(f"{today}:{f}")]
-        if fresh:
-            await selfheal.send_alert(settings, fresh)
+        recovered = [h for h in healed if selfheal.was_alerted(f"{today}:{h}")]
+        if recovered:
+            await selfheal.send_recovered(settings, recovered)
+    if failed:
+        print(f"[watchdog] 仍未补上: {failed}")
+        if settings.selfheal_alert:
+            fresh = [f for f in failed if selfheal.should_alert(f"{today}:{f}")]
+            if fresh:
+                await selfheal.send_alert(settings, [f"{f}：{reasons[f]}" for f in fresh])
     if not healed and not failed:
         print("[watchdog] 核对完成：今日推送均已就绪。")
 

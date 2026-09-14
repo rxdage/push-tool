@@ -396,6 +396,13 @@ async def run_pipeline(
     shortlist = await _drop_delivered_duplicates(session, shortlist, delivered_ids)
 
     results = await _summarize(shortlist, profile, subscription.feed_type, cfg)
+    if shortlist and not results:
+        # 有候选却一条都没摘要成功——几乎总是 VPN/网络或 Claude API 故障，不是"今天没内容"。
+        # 记 failed（不出 0 条 digest、也不补经典），交给 watchdog 重跑和告警，别再静默跳过。
+        print(f"  ! 摘要全部失败（{len(shortlist)} 条候选），本期记为 failed")
+        digest.status = "failed"
+        await session.flush()
+        return digest
 
     # 闸门 + 关联 item，按 relevance 降序
     passed = [
